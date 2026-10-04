@@ -120,6 +120,17 @@ Use the **CSV file** tab. Columns: `timestamp`, `consumption_kwh` (total incl. E
 `grid_import_kwh` + `grid_export_kwh`, plus optional `solar_kwh` and `ev_kwh`. A template is
 downloadable in the app.
 
+## Results, what-ifs and saving
+
+- **What if:** in *Assumptions*, change household use or EV charging by a percentage. Every hour
+  is scaled equally, so your daily and seasonal pattern stays as measured: good for "use 10 %
+  less" or "a second car with the same habits", not for a heat pump (which adds mostly winter
+  load). A banner on the result shows the scenario next to your measured numbers.
+- **Download results (Excel):** one `.xlsx` with a *Summary* (recommendation, data, scenario and
+  every assumption), *All sizes*, *Monthly* totals and the *Hourly data* used.
+- **Data survives a refresh:** the last loaded dataset is kept in this browser until you load
+  new data or click *Forget saved data*. Settings and sensor choices are kept too.
+
 ## How the simulation works
 
 For every hour:
