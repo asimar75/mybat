@@ -43,13 +43,26 @@ autocomplete from every energy sensor HA has).
 
 ### Running it permanently on a Raspberry Pi
 
-For a Pi 3, 4 or 5 running **64-bit Raspberry Pi OS**. This does not work on Home Assistant OS,
-which doesn't allow installing software this way.
+Works on Raspberry Pi OS, 32-bit or 64-bit (Pi 2 or newer). Not on a Pi Zero/1 (`uname -m` says
+`armv6l`), and not on Home Assistant OS, which doesn't allow installing software this way.
 
 ```bash
 # 1. Node.js 22 (the version in apt is too old for this app)
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs git
+if ! node -v 2>/dev/null | grep -q '^v22'; then
+  if [ "$(uname -m)" = "armv7l" ]; then
+    # 32-bit OS: NodeSource doesn't support it, use the official Node.js build
+    cd /tmp
+    NODE_TAR=$(curl -fsSL https://nodejs.org/dist/latest-v22.x/ | grep -o 'node-v22[^"]*-linux-armv7l.tar.xz' | head -1)
+    curl -fsSLO "https://nodejs.org/dist/latest-v22.x/$NODE_TAR"
+    sudo tar -xJf "$NODE_TAR" -C /usr/local --strip-components=1 --exclude='*.md' --exclude=LICENSE
+    rm "$NODE_TAR"
+    hash -r
+  else
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  fi
+fi
+sudo apt-get install -y git
 
 # 2. Get and build the app
 git clone https://github.com/asimar75/mybat.git ~/mybat
@@ -66,7 +79,7 @@ After=network-online.target
 [Service]
 User=$USER
 WorkingDirectory=$HOME/mybat
-ExecStart=/usr/bin/npm run preview
+ExecStart=$(command -v npm) run preview
 Restart=on-failure
 
 [Install]
@@ -75,6 +88,11 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now mybat
 ```
+
+If the repository is private, `git clone` asks for a username and password: use your GitHub
+username and a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with
+read-only *Contents* access to this repository (GitHub no longer accepts account passwords for git).
+Run `git config --global credential.helper store` first so later `git pull`s don't ask again.
 
 Open `http://<pi-address>:8050` from any device on your network (find the address with
 `hostname -I`). Check it's running with `systemctl status mybat`.
