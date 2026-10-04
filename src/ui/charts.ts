@@ -12,7 +12,9 @@ import {
   type ChartConfiguration,
 } from 'chart.js';
 import type { Recommendation, SweepRow } from '../engine/sweep';
-import { kwh, money, pct } from './format';
+import type { DayTotals, HourProfile } from '../data/validate';
+import type { HourSample } from '../engine/types';
+import { kwh, money, num1, pct } from './format';
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
 
@@ -25,6 +27,7 @@ function tokens() {
   return {
     series1: v('--series-1'),
     series2: v('--series-2'),
+    series3: v('--series-3'),
     text: v('--text-secondary'),
     muted: v('--text-muted'),
     grid: v('--grid'),
@@ -163,6 +166,87 @@ export function renderCharts(rec: Recommendation, highlight: SweepRow | null, cu
         ...monthly.plugins,
         tooltip: { ...monthly.plugins.tooltip, callbacks: { label: (item) => `${item.dataset.label}: ${kwh(item.parsed.y ?? 0)}` } },
       },
+    },
+  });
+}
+
+/** Input-validation charts: same entity → same colour everywhere (house blue, EV orange, solar aqua). */
+export function renderDataCharts(
+  daily: DayTotals[],
+  profile: HourProfile,
+  day: HourSample[],
+  onPickDay: (day: string) => void,
+) {
+  const t = tokens();
+  const entities = (pick: (k: 'house' | 'ev' | 'solar') => number[]) => [
+    { ...line('House', pick('house'), t.series1), tension: 0 },
+    { ...line('EV charger', pick('ev'), t.series2), tension: 0 },
+    { ...line('Solar', pick('solar'), t.series3), tension: 0 },
+  ];
+  const kwhTooltip = (o: ReturnType<typeof baseOptions>, title: (label: string) => string) => ({
+    ...o.plugins,
+    tooltip: {
+      ...o.plugins.tooltip,
+      callbacks: {
+        title: (items: { label: string }[]) => title(items[0].label),
+        label: (item: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+          `${item.dataset.label}: ${num1(item.parsed.y ?? 0)} kWh`,
+      },
+    },
+  });
+
+  const dailyOpts = baseOptions((v) => `${v} kWh`);
+  render('chart-daily', {
+    type: 'line',
+    data: { labels: daily.map((d) => d.day), datasets: entities((k) => daily.map((d) => d[k])) },
+    options: {
+      ...dailyOpts,
+      plugins: kwhTooltip(dailyOpts, (label) => new Date(`${label}T12:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) + ' · click to inspect'),
+      scales: {
+        ...dailyOpts.scales,
+        x: {
+          ...dailyOpts.scales.x,
+          ticks: {
+            color: t.muted,
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 12,
+            callback(this: { getLabelForValue: (v: number) => string }, v: number | string) {
+              const date = new Date(`${this.getLabelForValue(Number(v))}T12:00`);
+              // Short periods need the day in the label, or every tick in a month reads the same.
+              return date.toLocaleDateString(undefined, daily.length <= 120 ? { day: 'numeric', month: 'short' } : { month: 'short', year: '2-digit' });
+            },
+          },
+        },
+      },
+      onClick: (event, _active, chart) => {
+        if (!event.native) return;
+        const hit = chart.getElementsAtEventForMode(event.native, 'index', { intersect: false }, false);
+        if (hit.length > 0) onPickDay(daily[hit[0].index].day);
+      },
+    },
+  });
+
+  const hours = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
+  const profileOpts = baseOptions((v) => `${num1(v)} kWh`);
+  render('chart-profile', {
+    type: 'line',
+    data: { labels: hours, datasets: entities((k) => profile[k]) },
+    options: { ...profileOpts, plugins: kwhTooltip(profileOpts, (label) => `Average ${label}–${label.slice(0, 2)}:59`) },
+  });
+
+  const dayOpts = baseOptions((v) => `${num1(v)} kWh`);
+  const dayLabels = day.map((s) => new Date(s.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
+  render('chart-day', {
+    type: 'line',
+    data: {
+      labels: dayLabels,
+      datasets: entities((k) => day.map((s) => s[k])).map((d) => ({ ...d, pointRadius: 2 })),
+    },
+    options: {
+      ...dayOpts,
+      plugins: kwhTooltip(dayOpts, (label) => label),
+      scales: { ...dayOpts.scales, x: { ...dayOpts.scales.x, ticks: { color: t.muted, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
     },
   });
 }

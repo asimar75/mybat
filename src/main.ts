@@ -6,7 +6,8 @@ import { CSV_TEMPLATE, parseCsv } from './data/csv';
 import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, parseEnergyPrefs } from './data/homeassistant';
-import { renderCharts } from './ui/charts';
+import { dailyTotals, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
+import { renderCharts, renderDataCharts } from './ui/charts';
 import { dateRange, escapeHtml, kwh, money, num1, pct, years } from './ui/format';
 
 // ---------- small helpers ----------
@@ -66,6 +67,7 @@ function setData(samples: HourSample[], label: string, notes: string[] = []) {
   dataNotes = notes;
   setStatus(`Loaded ${label}.`, 'ok');
   renderSummary();
+  renderValidation();
   recompute();
 }
 
@@ -73,12 +75,7 @@ $('#demo-load').addEventListener('click', () => setData(demoYear(), 'demo year')
 
 $('#csv-template').addEventListener('click', (e) => {
   e.preventDefault();
-  const url = URL.createObjectURL(new Blob([CSV_TEMPLATE], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'battery-sizer-template.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadText(CSV_TEMPLATE, 'battery-sizer-template.csv');
 });
 
 $<HTMLInputElement>('#csv-file').addEventListener('change', async (e) => {
@@ -111,6 +108,48 @@ const mapFields = {
   batteryIn: $<HTMLInputElement>('#map-bi'),
 };
 const splitIds = (v: string) => v.split(',').map((s) => s.trim()).filter(Boolean);
+const haDays = $<HTMLInputElement>('#ha-days');
+haDays.value = storage.get('mybat.haDays') ?? haDays.value;
+haDays.addEventListener('change', () => storage.set('mybat.haDays', haDays.value));
+
+// Sensor choices are remembered per Home Assistant address, so reconnecting restores your picks
+// instead of re-running auto-detection. "Reset" goes back to what the Energy dashboard suggests.
+type SensorValues = Record<keyof typeof mapFields, string>;
+let detectedSensors: SensorValues | null = null;
+const sensorKey = () => `mybat.sensors.${haUrl.value.trim().replace(/\/+$/, '').toLowerCase()}`;
+
+function readSensorFields(): SensorValues {
+  const out = {} as SensorValues;
+  for (const [k, el] of Object.entries(mapFields)) out[k as keyof SensorValues] = el.value.trim();
+  return out;
+}
+
+function fillSensorFields(values: SensorValues) {
+  for (const [k, el] of Object.entries(mapFields)) el.value = values[k as keyof SensorValues] ?? '';
+}
+
+function loadSavedSensors(): SensorValues | null {
+  try {
+    const raw = storage.get(sensorKey());
+    return raw ? (JSON.parse(raw) as SensorValues) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSensors() {
+  storage.set(sensorKey(), JSON.stringify(readSensorFields()));
+  $('#sensors-saved').textContent = 'Sensor choices saved on this device.';
+}
+
+for (const el of Object.values(mapFields)) el.addEventListener('change', saveSensors);
+
+$('#sensors-reset').addEventListener('click', () => {
+  if (!detectedSensors) return;
+  fillSensorFields(detectedSensors);
+  storage.set(sensorKey(), null);
+  $('#sensors-saved').textContent = 'Reset to what your Energy dashboard suggests.';
+});
 
 $('#ha-connect').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('#ha-connect');
@@ -128,27 +167,36 @@ $('#ha-connect').addEventListener('click', async () => {
       .map((s) => `<option value="${escapeHtml(s.statistic_id)}">${escapeHtml(s.name ?? '')}</option>`)
       .join('');
 
-    mapFields.gridImport.value = sel.gridImport.join(', ');
-    mapFields.gridExport.value = sel.gridExport.join(', ');
-    mapFields.solar.value = sel.solar.join(', ');
-    mapFields.batteryOut.value = sel.batteryOut.join(', ');
-    mapFields.batteryIn.value = sel.batteryIn.join(', ');
     const evGuess =
       sel.devices.find((d) => looksLikeEv(`${d.id} ${d.name}`))?.id ??
       stats.find((s) => looksLikeEv(`${s.statistic_id} ${s.name ?? ''}`))?.statistic_id ??
       '';
-    mapFields.ev.value = evGuess;
+    detectedSensors = {
+      gridImport: sel.gridImport.join(', '),
+      gridExport: sel.gridExport.join(', '),
+      solar: sel.solar.join(', '),
+      batteryOut: sel.batteryOut.join(', '),
+      batteryIn: sel.batteryIn.join(', '),
+      ev: evGuess,
+    };
+    const saved = loadSavedSensors();
+    fillSensorFields(saved ?? detectedSensors);
+    $('#sensors-saved').textContent = saved ? 'Using your saved sensor choices.' : '';
     $('#ha-mapping').hidden = false;
 
-    const missing = [];
-    if (sel.gridImport.length === 0) missing.push('grid import');
-    if (sel.solar.length === 0) missing.push('solar');
-    setStatus(
-      missing.length
-        ? `Connected. Your Energy dashboard has no ${missing.join(' or ')} configured — fill it in below.`
-        : `Connected. Check the sensors below${evGuess ? '' : ' (no EV charger found — pick one if you have it)'}, then load history.`,
-      missing.length ? 'error' : 'ok',
-    );
+    if (saved) {
+      setStatus('Connected. Your saved sensors are filled in — load history when ready.', 'ok');
+    } else {
+      const missing = [];
+      if (sel.gridImport.length === 0) missing.push('grid import');
+      if (sel.solar.length === 0) missing.push('solar');
+      setStatus(
+        missing.length
+          ? `Connected. Your Energy dashboard has no ${missing.join(' or ')} configured — fill it in below.`
+          : `Connected. Check the sensors below${evGuess ? '' : ' (no EV charger found — pick one if you have it)'}, then load history.`,
+        missing.length ? 'error' : 'ok',
+      );
+    }
   } catch (err) {
     setStatus((err as Error).message, 'error');
   } finally {
@@ -169,7 +217,8 @@ $('#ha-load').addEventListener('click', async () => {
     ev: mapFields.ev.value.trim(),
   };
   const ids = [...new Set([...sel.gridImport, ...sel.gridExport, ...sel.solar, ...sel.batteryOut, ...sel.batteryIn, sel.ev].filter(Boolean))];
-  const days = Math.max(7, Math.min(1825, Number($<HTMLInputElement>('#ha-days').value) || 365));
+  saveSensors();
+  const days = Math.max(7, Math.min(1825, Number(haDays.value) || 365));
   const end = new Date();
   end.setMinutes(0, 0, 0);
   const start = new Date(end.getTime() - days * 24 * 3600 * 1000);
@@ -404,7 +453,12 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
 
 function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number) {
   const focus = rec.best ?? rec.knee;
+  const dataWarning = failedChecks.length
+    ? `<p class="note"><b>Check your data first.</b> Step 2 flagged: ${escapeHtml(failedChecks.join('; '))}.
+       This result is computed from that data as-is.</p>`
+    : '';
   $('#results-body').innerHTML = `
+    ${dataWarning}
     ${verdict(rec, currency, lifetime)}
     ${insights(rec, focus, currency, evMode)}
     <div class="charts">
@@ -427,5 +481,147 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
 
 // Re-draw charts when the OS theme flips so their colours follow.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (data) showDay(selectedDay);
   if (lastRec) recompute();
+});
+
+// ---------- step 2: check your data ----------
+
+let daily: DayTotals[] = [];
+let profile: HourProfile = { house: [], ev: [], solar: [] };
+let selectedDay = '';
+const dayPick = $<HTMLInputElement>('#day-pick');
+
+function downloadText(text: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function shortDateTime(t: number): string {
+  return new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+let failedChecks: string[] = [];
+
+function renderChecks() {
+  if (!data) return;
+  const checks = runChecks(data.samples);
+  failedChecks = checks.filter((c) => !c.ok).map((c) => c.title);
+  $('#checks').innerHTML = checks
+    .map(
+      (c) => `
+      <li class="${c.ok ? 'ok' : 'warn'}">
+        <span class="icon" aria-label="${c.ok ? 'OK' : 'Warning'}">${c.ok ? '✓' : '!'}</span>
+        <b>${escapeHtml(c.title)}</b>
+        <p>${escapeHtml(c.detail)}</p>
+        ${
+          c.examples.length
+            ? `<div class="examples">${c.examples
+                .map((t) => `<button type="button" class="link-btn" data-day="${localDay(t)}">${shortDateTime(t)}</button>`)
+                .join('')}</div>`
+            : ''
+        }
+      </li>`,
+    )
+    .join('');
+}
+
+function renderMonthTable() {
+  if (!data) return;
+  const months = monthlyTotals(data.samples);
+  const fmt = (v: number) => num1(v);
+  const total = months.reduce(
+    (a, m) => ({
+      house: a.house + m.house,
+      ev: a.ev + m.ev,
+      solar: a.solar + m.solar,
+      gridImport: a.gridImport + m.gridImport,
+      gridExport: a.gridExport + m.gridExport,
+      hours: a.hours + m.hours,
+      expectedHours: a.expectedHours + m.expectedHours,
+    }),
+    { house: 0, ev: 0, solar: 0, gridImport: 0, gridExport: 0, hours: 0, expectedHours: 0 },
+  );
+  const row = (label: string, m: typeof total, cls = '') => {
+    const coverage = m.expectedHours ? m.hours / m.expectedHours : 1;
+    return `<tr${cls || coverage < 0.98 ? ` class="${cls || 'short'}"` : ''}>
+      <td>${label}</td><td>${fmt(m.house)}</td><td>${fmt(m.ev)}</td><td>${fmt(m.house + m.ev)}</td>
+      <td>${fmt(m.solar)}</td><td>${fmt(m.gridImport)}</td><td>${fmt(m.gridExport)}</td><td>${pct(coverage)}</td></tr>`;
+  };
+  $('#month-table').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Month</th><th>House kWh</th><th>EV kWh</th><th>Total use kWh</th><th>Solar kWh</th>
+        <th>Grid import* kWh</th><th>Grid export* kWh</th><th>Hours with data</th>
+      </tr></thead>
+      <tbody>
+        ${months
+          .map((m) => row(new Date(`${m.month}-01T12:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }), m))
+          .join('')}
+        ${row('Total', total, 'hl')}
+      </tbody>
+    </table>
+    <p class="hint">* Without a battery, netted per hour. Home Assistant measures import and export continuously,
+    so both of its figures can be slightly higher; total use and solar should match closely.</p>`;
+}
+
+function renderDayTable(samples: HourSample[]) {
+  const cell = (v: number, bad: boolean) => `<td${bad ? ' class="flag"' : ''}>${v.toFixed(2)}</td>`;
+  $('#day-table').innerHTML = samples.length
+    ? `<table>
+        <thead><tr><th>Hour</th><th>House kWh</th><th>EV kWh</th><th>Solar kWh</th><th>Grid import* kWh</th><th>Grid export* kWh</th></tr></thead>
+        <tbody>${samples
+          .map((s) => {
+            const h = new Date(s.t).getHours();
+            const load = s.house + s.ev;
+            return `<tr><td>${new Date(s.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</td>
+              ${cell(s.house, s.house > LIMITS.houseKwh || load < 0.01)}${cell(s.ev, s.ev > LIMITS.evKwh)}
+              ${cell(s.solar, h <= 3 && s.solar > LIMITS.nightSolarKwh)}
+              ${cell(Math.max(0, load - s.solar), false)}${cell(Math.max(0, s.solar - load), false)}</tr>`;
+          })
+          .join('')}</tbody>
+      </table>`
+    : '<p class="hint">No data for this day.</p>';
+}
+
+function showDay(day: string) {
+  if (!data) return;
+  selectedDay = day;
+  dayPick.value = day;
+  const samples = data.samples.filter((s) => localDay(s.t) === day);
+  renderDataCharts(daily, profile, samples, (d) => showDay(d));
+  renderDayTable(samples);
+}
+
+function renderValidation() {
+  if (!data) return;
+  $('#validate').hidden = false;
+  daily = dailyTotals(data.samples);
+  profile = hourProfile(data.samples);
+  dayPick.min = daily[0].day;
+  dayPick.max = daily[daily.length - 1].day;
+  // Default to the most recent complete day (23–25 hours allows for daylight-saving changes).
+  const lastFull = [...daily].reverse().find((d) => d.hours >= 23) ?? daily[daily.length - 1];
+  renderChecks();
+  renderMonthTable();
+  showDay(lastFull.day);
+}
+
+dayPick.addEventListener('change', () => {
+  if (dayPick.value) showDay(dayPick.value);
+});
+
+$('#checks').addEventListener('click', (e) => {
+  const day = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-day]')?.dataset.day;
+  if (!day) return;
+  showDay(day);
+  document.getElementById('chart-day')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+$('#csv-export').addEventListener('click', () => {
+  if (data) downloadText(toCsv(data.samples), 'battery-sizer-hourly.csv');
 });

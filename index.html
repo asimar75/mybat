@@ -61,8 +61,10 @@
               <label>Existing battery — discharge <input id="map-bo" list="ha-stats" placeholder="none" /></label>
               <label>Existing battery — charge <input id="map-bi" list="ha-stats" placeholder="none" /></label>
             </div>
-            <div class="actions">
+            <div class="actions inline">
               <button id="ha-load" class="primary">Load history</button>
+              <button id="sensors-reset" class="link-btn" type="button">Reset to Energy dashboard</button>
+              <span id="sensors-saved" class="hint" style="margin:0"></span>
             </div>
           </div>
         </div>
@@ -89,8 +91,47 @@
         <div id="summary"></div>
       </section>
 
+      <section class="card" id="validate" hidden>
+        <h2><span class="step">2</span> Check your data</h2>
+        <p class="hint">
+          The result is only as good as this input. Compare the monthly table with Home Assistant →
+          <b>Energy</b> → month view; the totals should be close. Click any day in the chart, or an example below a
+          warning, to inspect it hour by hour.
+        </p>
+        <ul id="checks" class="checks"></ul>
+        <div class="charts">
+          <figure class="wide">
+            <figcaption>Daily energy<small>Look for gaps, flat lines and single-day spikes. Solar should follow the seasons.</small></figcaption>
+            <div class="chart-box"><canvas id="chart-daily" role="img" aria-label="Daily household, EV and solar energy"></canvas></div>
+          </figure>
+          <figure>
+            <figcaption>Average day<small>Solar should peak around midday; if not, timestamps are shifted.</small></figcaption>
+            <div class="chart-box"><canvas id="chart-profile" role="img" aria-label="Average energy by hour of day"></canvas></div>
+          </figure>
+          <figure>
+            <figcaption class="day-pick">
+              <span>One day, hour by hour</span>
+              <input id="day-pick" type="date" aria-label="Day to inspect" />
+            </figcaption>
+            <div class="chart-box"><canvas id="chart-day" role="img" aria-label="Hourly energy for the selected day"></canvas></div>
+          </figure>
+        </div>
+        <details class="table-wrap" open>
+          <summary>Monthly totals (compare with Home Assistant)</summary>
+          <div class="scroll" id="month-table"></div>
+        </details>
+        <details class="table-wrap">
+          <summary>Hourly values for the selected day</summary>
+          <div class="scroll" id="day-table"></div>
+        </details>
+        <div class="actions inline">
+          <button id="csv-export" class="link-btn" type="button">Download all hourly data (CSV)</button>
+          <span class="hint" style="margin:0">Same format as the CSV import: open it in a spreadsheet, fix values, and load it back.</span>
+        </div>
+      </section>
+
       <section class="card" id="assumptions">
-        <h2><span class="step">2</span> Assumptions</h2>
+        <h2><span class="step">3</span> Assumptions</h2>
         <p class="hint">Defaults are placeholders. Replace them with your real tariff and a real installer quote — the answer is only as good as these numbers.</p>
         <form id="settings" class="settings" onsubmit="return false">
           <fieldset>
@@ -132,7 +173,7 @@
       </section>
 
       <section class="card" id="results">
-        <h2><span class="step">3</span> Result</h2>
+        <h2><span class="step">4</span> Result</h2>
         <div id="results-body"><p class="hint">Load data in step 1 to see results.</p></div>
       </section>
     </main>
