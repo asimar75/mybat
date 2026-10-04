@@ -134,6 +134,10 @@ downloadable in the app.
   is scaled equally, so your daily and seasonal pattern stays as measured: good for "use 10 %
   less" or "a second car with the same habits", not for a heat pump (which adds mostly winter
   load). A banner on the result shows the scenario next to your measured numbers.
+- **Hour by hour with a battery:** under the result, pick any tested size, a start date, 1–14 days
+  and whether the battery may charge the car. One chart shows the energy stored; the other shows
+  each hour's charging (from solar or grid, above zero) and discharging (to the house or the EV,
+  below zero), with solar and home use for context. It opens on a recent sunny spell.
 - **Download results (Excel):** one `.xlsx` with a *Summary* (recommendation, data, scenario and
   every assumption), *All sizes*, *Monthly* totals and the *Hourly data* used.
 - **Data survives a refresh:** the last loaded dataset is kept in this browser until you load

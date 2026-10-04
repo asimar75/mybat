@@ -3,6 +3,7 @@ import {
   BarElement,
   CategoryScale,
   Chart,
+  Filler,
   Legend,
   LinearScale,
   LineController,
@@ -16,7 +17,7 @@ import type { DayTotals, HourProfile } from '../data/validate';
 import type { HourSample } from '../engine/types';
 import { kwh, money, num1, pct } from './format';
 
-Chart.register(BarController, BarElement, CategoryScale, LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
+Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
 
 const charts = new Map<string, Chart>();
 
@@ -252,4 +253,87 @@ export function renderDataCharts(
       scales: { ...dayOpts.scales, x: { ...dayOpts.scales.x, ticks: { color: t.muted, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
     },
   });
+}
+
+export interface BatteryWindow {
+  times: number[];
+  usableKwh: number;
+  soc: number[];
+  chargeSolar: number[];
+  chargeGrid: number[];
+  toHouse: number[];
+  toEv: number[];
+  solar: number[];
+  load: number[];
+}
+
+/**
+ * Hourly battery behaviour for a chosen window: state of charge on top, energy flows below on the
+ * same time axis (two charts rather than one dual-axis chart — kWh stored and kWh per hour are
+ * different quantities). Flows: charging is positive, discharging negative.
+ */
+export function renderBatteryCharts(w: BatteryWindow) {
+  const t = tokens();
+  const multiDay = w.times.length > 24;
+  const labels = w.times.map((ms) =>
+    new Date(ms).toLocaleString(undefined, multiDay ? { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' }),
+  );
+  const xTicks = { color: t.muted, maxRotation: 0, autoSkip: true, maxTicksLimit: multiDay ? 10 : 12 };
+  const kwhLabel = (item: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+    `${item.dataset.label}: ${Math.abs(item.parsed.y ?? 0).toFixed(2)} kWh`;
+
+  const socOpts = baseOptions((v) => `${num1(v)} kWh`);
+  render('chart-soc', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ ...line('Stored energy', w.soc, t.series1), tension: 0, fill: 'origin', backgroundColor: `${t.series1}33` }],
+    },
+    options: {
+      ...socOpts,
+      plugins: { ...socOpts.plugins, legend: { display: false }, tooltip: { ...socOpts.plugins.tooltip, callbacks: { label: kwhLabel } } },
+      scales: { x: { ...socOpts.scales.x, ticks: xTicks }, y: { ...socOpts.scales.y, min: 0, max: Math.max(0.1, w.usableKwh) } },
+    },
+  });
+
+  const bar = (label: string, data: number[], color: string) => ({
+    type: 'bar' as const,
+    label,
+    data,
+    backgroundColor: color,
+    borderColor: t.surface,
+    borderWidth: 1,
+    stack: 'battery',
+    order: 2,
+  });
+  const ctxLine = (label: string, data: number[], color: string, stack: string, dashed = false) => ({
+    ...line(label, data, color, dashed),
+    type: 'line' as const,
+    tension: 0,
+    stack,
+    order: 1,
+  });
+  const flowOpts = baseOptions((v) => `${num1(v)} kWh`);
+  render('chart-flows', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        bar('Charging from solar', w.chargeSolar, t.series3),
+        bar('Charging from grid', w.chargeGrid, t.muted),
+        bar('Discharging to house', w.toHouse.map((v) => -v), t.series1),
+        bar('Discharging to EV', w.toEv.map((v) => -v), t.series2),
+        ctxLine('Solar production', w.solar, t.series3, 'solar', true),
+        ctxLine('Home use', w.load, t.text, 'load'),
+      ],
+    },
+    options: {
+      ...flowOpts,
+      plugins: { ...flowOpts.plugins, tooltip: { ...flowOpts.plugins.tooltip, callbacks: { label: kwhLabel } } },
+      scales: {
+        x: { ...flowOpts.scales.x, stacked: true, ticks: xTicks },
+        y: { ...flowOpts.scales.y, stacked: true },
+      },
+    },
+  } as ChartConfiguration);
 }

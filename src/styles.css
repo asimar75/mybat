@@ -511,3 +511,19 @@ tr.short td:last-child {
   flex-wrap: wrap;
   align-items: center;
 }
+
+.sim-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-end;
+}
+.sim-controls label {
+  min-width: 150px;
+}
+.chart-box.short {
+  height: 170px;
+}
+.chart-box.tall {
+  height: 300px;
+}

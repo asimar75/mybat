@@ -1,6 +1,6 @@
 import './styles.css';
 import { applyScenario, describeScenario, isNoChange, shiftWaterHeater, type Scenario } from './engine/scenario';
-import { prepare, simulate, type PreparedData } from './engine/simulate';
+import { createTrace, prepare, simulate, usableKwh, type PreparedData } from './engine/simulate';
 import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/sweep';
 import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
 import { CSV_TEMPLATE, parseCsv } from './data/csv';
@@ -9,7 +9,7 @@ import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
 import { dailyTotals, hasWaterHeater, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, loadDataset, saveDataset } from './data/persist';
-import { renderCharts, renderDataCharts } from './ui/charts';
+import { renderBatteryCharts, renderCharts, renderDataCharts } from './ui/charts';
 import { exportExcel } from './ui/excel';
 import { dateRange, escapeHtml, kwh, money, num1, pct, years } from './ui/format';
 
@@ -432,9 +432,15 @@ function waterHeaterInsight(shifted: Recommendation, measuredTiming: Recommendat
   if (Math.abs(save) < 5) {
     return `<b>Water heater:</b> moving it to solar hours changes little (${money(save, currency)} a year) — it already runs when solar is available, or there's little surplus to use.`;
   }
+  const neither = !shifted.best && !measuredTiming.best;
+  const batteryPart = neither
+    ? 'At these prices no battery pays back with either timing.'
+    : shiftOn
+      ? `Best battery: ${best(measuredTiming)} with the measured timing, ${best(shifted)} with it shifted (shown here).`
+      : `The best battery would be ${best(shifted)} instead of ${best(measuredTiming)}.`;
   return shiftOn
-    ? `<b>Water heater on solar surplus</b> saves ${money(save, currency)} a year before any battery, compared with its measured timing. Best battery: ${best(measuredTiming)} with the measured timing, ${best(shifted)} with it shifted (shown here).`
-    : `<b>Try “Run water heater on solar surplus”</b> in Strategy: it would save ${money(save, currency)} a year with no battery at all, and the best battery would be ${best(shifted)} instead of ${best(measuredTiming)}. A timer or solar diverter on the heater does this.`;
+    ? `<b>Water heater on solar surplus</b> saves ${money(save, currency)} a year before any battery, compared with its measured timing. ${batteryPart}`
+    : `<b>Try “Run water heater on solar surplus”</b> in Strategy: it would save ${money(save, currency)} a year with no battery at all. ${batteryPart} A timer or solar diverter on the heater does this.`;
 }
 
 function verdict(rec: Recommendation, currency: string, lifetime: number): string {
@@ -566,13 +572,138 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
         <div class="chart-box"><canvas id="chart-monthly" role="img" aria-label="Monthly grid import with and without battery"></canvas></div>
       </figure>
     </div>
+    <h3>Hour by hour with a battery</h3>
+    <p class="hint">What the simulated battery does each hour. Opens on a recent sunny spell; pick a winter week to see where batteries struggle.</p>
+    <div class="sim-controls">
+      <label>Battery size
+        <select id="sim-size">${rec.rows
+          .filter((r) => r.nominalKwh > 0)
+          .map((r) => `<option value="${r.nominalKwh}">${r.nominalKwh} kWh${r === rec.best ? ' (best value)' : r === rec.knee ? ' (90 % of max saving)' : ''}</option>`)
+          .join('')}</select>
+      </label>
+      <label>From <input id="sim-start" type="date" /></label>
+      <label>Show
+        <select id="sim-days"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option></select>
+      </label>
+      <label>EV charger
+        <select id="sim-ev"><option value="exclude">Battery never charges the car</option><option value="include">Battery may charge the car</option></select>
+      </label>
+    </div>
+    <div class="charts">
+      <figure class="wide">
+        <figcaption>Energy stored in the battery<small>Usable capacity at the top of the scale</small></figcaption>
+        <div class="chart-box short"><canvas id="chart-soc" role="img" aria-label="Battery state of charge per hour"></canvas></div>
+      </figure>
+      <figure class="wide">
+        <figcaption>Battery charge and discharge per hour<small>Above zero: charging. Below zero: discharging. Lines show solar and total home use for context.</small></figcaption>
+        <div class="chart-box tall"><canvas id="chart-flows" role="img" aria-label="Battery charging and discharging per hour"></canvas></div>
+      </figure>
+    </div>
+    <p id="sim-summary" class="hint"></p>
     ${table(rec, currency, focus)}
     <div class="actions inline">
       <button id="xlsx-export" class="primary" type="button">Download results (Excel)</button>
       <span class="hint" style="margin:0">Summary, all sizes, monthly totals and the hourly data, in one .xlsx file.</span>
     </div>`;
   renderCharts(rec, focus, currency);
+  renderBatterySim(rec);
 }
+
+// ---------- hour-by-hour battery view ----------
+
+let simSizeChoice: number | null = null;
+let simStart = '';
+let simDays = 3;
+
+/**
+ * Default window: the most recent day with solar in the top quarter of all days, so the view
+ * opens on a period where the battery actually cycles (winter days often show it idle).
+ */
+function sunnySpellStart(days: number): string {
+  const sorted = daily.map((d) => d.solar).sort((a, b) => a - b);
+  const threshold = sorted[Math.floor(sorted.length * 0.75)] ?? 0;
+  const sunny = [...daily].reverse().find((d) => d.solar >= threshold && d.solar > 0) ?? daily[daily.length - 1];
+  const start = new Date(`${sunny.day}T12:00`);
+  start.setDate(start.getDate() - Math.floor((days - 1) / 2));
+  return localDay(Math.max(start.getTime(), new Date(`${daily[0].day}T12:00`).getTime()));
+}
+
+function renderBatterySim(rec: Recommendation) {
+  if (!simData || !lastCfg) return;
+  const sizes = rec.rows.filter((r) => r.nominalKwh > 0).map((r) => r.nominalKwh);
+  if (sizes.length === 0) return;
+  const fallback = rec.best?.nominalKwh ?? rec.knee?.nominalKwh ?? sizes[Math.min(4, sizes.length - 1)];
+  const size = simSizeChoice !== null && sizes.includes(simSizeChoice) ? simSizeChoice : fallback;
+  const samples = simData.samples;
+  const first = localDay(samples[0].t);
+  const last = localDay(samples[samples.length - 1].t);
+  if (!simStart || simStart < first || simStart > last) simStart = sunnySpellStart(simDays);
+
+  const sizeSel = $<HTMLSelectElement>('#sim-size');
+  const startIn = $<HTMLInputElement>('#sim-start');
+  sizeSel.value = String(size);
+  startIn.min = first;
+  startIn.max = last;
+  startIn.value = simStart;
+  $<HTMLSelectElement>('#sim-days').value = String(simDays);
+  $<HTMLSelectElement>('#sim-ev').value = lastCfg.options.evMode;
+
+  const spec = { ...lastCfg.template, nominalKwh: size };
+  const trace = createTrace(samples.length);
+  simulate(simData, spec, lastCfg.tariff, lastCfg.options, trace);
+
+  const startMs = new Date(`${simStart}T00:00`).getTime();
+  const endDate = new Date(`${simStart}T00:00`);
+  endDate.setDate(endDate.getDate() + simDays);
+  const idx: number[] = [];
+  samples.forEach((s, i) => {
+    if (s.t >= startMs && s.t < endDate.getTime()) idx.push(i);
+  });
+  const pick = (arr: Float32Array) => idx.map((i) => arr[i]);
+  const usable = usableKwh(spec);
+  renderBatteryCharts({
+    times: idx.map((i) => samples[i].t),
+    usableKwh: usable,
+    soc: pick(trace.soc),
+    chargeSolar: pick(trace.chargeSolar),
+    chargeGrid: pick(trace.chargeGrid),
+    toHouse: pick(trace.toHouse),
+    toEv: pick(trace.toEv),
+    solar: idx.map((i) => samples[i].solar),
+    load: idx.map((i) => samples[i].house + samples[i].ev + (samples[i].wh ?? 0)),
+  });
+
+  const sum = (arr: Float32Array) => idx.reduce((a, i) => a + arr[i], 0);
+  const withoutBattery = idx.reduce((a, i) => {
+    const s = samples[i];
+    return a + Math.max(0, s.house + s.ev + (s.wh ?? 0) - s.solar);
+  }, 0);
+  const fullHours = idx.filter((i) => trace.soc[i] >= usable * 0.98).length;
+  const emptyHours = idx.filter((i) => trace.soc[i] <= usable * 0.02).length;
+  const toEv = sum(trace.toEv);
+  $('#sim-summary').innerHTML = idx.length
+    ? `In this period the ${size} kWh battery took in <b>${kwh(sum(trace.chargeSolar))}</b> from solar` +
+      `${sum(trace.chargeGrid) > 0.05 ? ` and ${kwh(sum(trace.chargeGrid))} from the grid` : ''}, delivered <b>${kwh(sum(trace.toHouse))}</b> to the house` +
+      `${lastCfg.options.evMode === 'include' ? ` and <b>${kwh(toEv)}</b> to the EV` : ''}. ` +
+      `It was full for ${fullHours} h and empty for ${emptyHours} h. Grid import: ${kwh(sum(trace.gridImport))} with the battery vs ${kwh(withoutBattery)} without.`
+    : 'No data in this period.';
+}
+
+$('#results-body').addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement | HTMLSelectElement;
+  if (!lastRec) return;
+  if (el.id === 'sim-size') simSizeChoice = Number(el.value);
+  else if (el.id === 'sim-start' && el.value) simStart = el.value;
+  else if (el.id === 'sim-days') simDays = Number(el.value);
+  else if (el.id === 'sim-ev') {
+    // Same setting as Strategy → EV charger, so the whole result follows the choice.
+    (form.elements.namedItem('evMode') as HTMLSelectElement).value = el.value;
+    saveSettings();
+    recompute();
+    return;
+  } else return;
+  renderBatterySim(lastRec);
+});
 
 // Re-draw charts when the OS theme flips so their colours follow.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
