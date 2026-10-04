@@ -7,6 +7,76 @@
     <title>Battery Sizer</title>
   </head>
   <body>
+    <div class="layout">
+      <aside id="panel" class="panel" aria-label="Assumptions">
+        <div class="panel-head">
+          <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="false" aria-controls="settings">
+            <span class="panel-title">Assumptions</span>
+            <span class="panel-chevron" aria-hidden="true">▴</span>
+          </button>
+          <div id="live" class="live" aria-live="polite"><span class="hint">Load data to see the result here.</span></div>
+        </div>
+        <div class="panel-body">
+          <p class="hint">Change anything here and the result updates instantly. Defaults are placeholders: use your real tariff and an installer quote.</p>
+        <form id="settings" class="settings" onsubmit="return false">
+          <fieldset>
+            <legend>Tariff</legend>
+            <label>Currency symbol <input name="currency" value="€" maxlength="3" /></label>
+            <label class="check"><input name="useTimeOfUse" type="checkbox" /> Time-of-use (peak / off-peak) pricing</label>
+            <label data-flat>Import price per kWh <input name="importFlat" type="number" step="0.01" min="0" value="0.30" /></label>
+            <label data-tou>Peak price per kWh <input name="importPeak" type="number" step="0.01" min="0" value="0.36" /></label>
+            <label data-tou>Off-peak price per kWh <input name="importOffPeak" type="number" step="0.01" min="0" value="0.20" /></label>
+            <label data-tou>Peak starts (hour) <input name="peakStartHour" type="number" min="0" max="23" value="7" /></label>
+            <label data-tou>Peak ends (hour) <input name="peakEndHour" type="number" min="0" max="24" value="23" /></label>
+            <label>Export (feed-in) price per kWh <input name="exportPrice" type="number" step="0.01" min="0" value="0.08" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Battery &amp; cost</legend>
+            <label>Price per kWh of battery <input name="costPerKwh" type="number" step="10" min="0" value="450" /></label>
+            <label>Fixed cost (inverter, install) <input name="fixedCost" type="number" step="100" min="0" value="1500" /></label>
+            <label>Usable capacity % <input name="usablePct" type="number" min="50" max="100" value="95" /></label>
+            <label>Round-trip efficiency % <input name="efficiencyPct" type="number" min="50" max="100" value="90" /></label>
+            <label>Inverter max power (kW) <input name="inverterKw" type="number" step="0.5" min="0.5" value="5" /></label>
+            <label>Max power per usable kWh (C-rate) <input name="cRate" type="number" step="0.1" min="0.1" value="0.5" /></label>
+            <label>Lifetime (years) <input name="lifetimeYears" type="number" min="1" max="30" value="12" /></label>
+            <label>Capacity loss per year % <input name="degradationPct" type="number" step="0.5" min="0" max="10" value="2" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>EV reimbursement</legend>
+            <label class="check"><input name="reimbOn" type="checkbox" /> My employer reimburses home EV charging</label>
+            <label data-reimb>Default price per kWh <input name="reimbDefault" type="number" step="0.001" min="0" value="0.25" /></label>
+            <details data-reimb class="month-prices-wrap">
+              <summary>Price per month</summary>
+              <div id="reimb-months" class="month-prices"><p class="hint">Load data to list its months.</p></div>
+              <p class="hint" style="margin:6px 0 0">Empty months use the default price. Saved on this device.</p>
+            </details>
+          </fieldset>
+          <fieldset>
+            <legend>What if</legend>
+            <p class="hint" style="margin:0">Scales every hour of your history equally, keeping your daily and seasonal pattern. EV +100 % ≈ a second car with the same habits.</p>
+            <label>Change household use by (%) <input name="householdPct" type="number" step="5" min="-100" max="300" value="0" /></label>
+            <label>Change EV charging by (%) <input name="evPct" type="number" step="5" min="-100" max="300" value="0" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Strategy</legend>
+            <label>EV charger
+              <select name="evMode">
+                <option value="exclude">Battery never charges the car (recommended)</option>
+                <option value="include">Battery may charge the car</option>
+              </select>
+            </label>
+            <label class="check" data-tou><input name="gridCharge" type="checkbox" /> Charge battery from grid off-peak</label>
+            <label data-tou data-gridcharge>Grid-charge up to % <input name="gridChargePct" type="number" min="10" max="100" value="100" /></label>
+            <label class="check" data-wh><input name="whShift" type="checkbox" /> Run water heater on solar surplus</label>
+            <label data-wh data-whshift>Water heater max power (kW) <input name="whMaxKw" type="number" step="0.1" min="0.1" max="6" value="1" /></label>
+            <label>Largest size to test (kWh) <input name="maxKwh" type="number" min="2" max="100" value="25" /></label>
+            <label>Size step (kWh) <input name="stepKwh" type="number" step="0.5" min="0.5" value="1" /></label>
+          </fieldset>
+        </form>
+        </div>
+      </aside>
+
+      <div class="content">
     <header class="top">
       <h1>Battery Sizer</h1>
       <p class="lede">
@@ -134,68 +204,9 @@
         </div>
       </section>
 
-      <section class="card" id="assumptions">
-        <h2><span class="step">3</span> Assumptions</h2>
-        <p class="hint">Defaults are placeholders. Replace them with your real tariff and a real installer quote — the answer is only as good as these numbers.</p>
-        <form id="settings" class="settings" onsubmit="return false">
-          <fieldset>
-            <legend>Tariff</legend>
-            <label>Currency symbol <input name="currency" value="€" maxlength="3" /></label>
-            <label class="check"><input name="useTimeOfUse" type="checkbox" /> Time-of-use (peak / off-peak) pricing</label>
-            <label data-flat>Import price per kWh <input name="importFlat" type="number" step="0.01" min="0" value="0.30" /></label>
-            <label data-tou>Peak price per kWh <input name="importPeak" type="number" step="0.01" min="0" value="0.36" /></label>
-            <label data-tou>Off-peak price per kWh <input name="importOffPeak" type="number" step="0.01" min="0" value="0.20" /></label>
-            <label data-tou>Peak starts (hour) <input name="peakStartHour" type="number" min="0" max="23" value="7" /></label>
-            <label data-tou>Peak ends (hour) <input name="peakEndHour" type="number" min="0" max="24" value="23" /></label>
-            <label>Export (feed-in) price per kWh <input name="exportPrice" type="number" step="0.01" min="0" value="0.08" /></label>
-          </fieldset>
-          <fieldset>
-            <legend>Battery &amp; cost</legend>
-            <label>Price per kWh of battery <input name="costPerKwh" type="number" step="10" min="0" value="450" /></label>
-            <label>Fixed cost (inverter, install) <input name="fixedCost" type="number" step="100" min="0" value="1500" /></label>
-            <label>Usable capacity % <input name="usablePct" type="number" min="50" max="100" value="95" /></label>
-            <label>Round-trip efficiency % <input name="efficiencyPct" type="number" min="50" max="100" value="90" /></label>
-            <label>Inverter max power (kW) <input name="inverterKw" type="number" step="0.5" min="0.5" value="5" /></label>
-            <label>Max power per usable kWh (C-rate) <input name="cRate" type="number" step="0.1" min="0.1" value="0.5" /></label>
-            <label>Lifetime (years) <input name="lifetimeYears" type="number" min="1" max="30" value="12" /></label>
-            <label>Capacity loss per year % <input name="degradationPct" type="number" step="0.5" min="0" max="10" value="2" /></label>
-          </fieldset>
-          <fieldset>
-            <legend>EV reimbursement</legend>
-            <label class="check"><input name="reimbOn" type="checkbox" /> My employer reimburses home EV charging</label>
-            <label data-reimb>Default price per kWh <input name="reimbDefault" type="number" step="0.001" min="0" value="0.25" /></label>
-            <details data-reimb class="month-prices-wrap">
-              <summary>Price per month</summary>
-              <div id="reimb-months" class="month-prices"><p class="hint">Load data to list its months.</p></div>
-              <p class="hint" style="margin:6px 0 0">Empty months use the default price. Saved on this device.</p>
-            </details>
-          </fieldset>
-          <fieldset>
-            <legend>What if</legend>
-            <p class="hint" style="margin:0">Scales every hour of your history equally, keeping your daily and seasonal pattern. EV +100 % ≈ a second car with the same habits.</p>
-            <label>Change household use by (%) <input name="householdPct" type="number" step="5" min="-100" max="300" value="0" /></label>
-            <label>Change EV charging by (%) <input name="evPct" type="number" step="5" min="-100" max="300" value="0" /></label>
-          </fieldset>
-          <fieldset>
-            <legend>Strategy</legend>
-            <label>EV charger
-              <select name="evMode">
-                <option value="exclude">Battery never charges the car (recommended)</option>
-                <option value="include">Battery may charge the car</option>
-              </select>
-            </label>
-            <label class="check" data-tou><input name="gridCharge" type="checkbox" /> Charge battery from grid off-peak</label>
-            <label data-tou data-gridcharge>Grid-charge up to % <input name="gridChargePct" type="number" min="10" max="100" value="100" /></label>
-            <label class="check" data-wh><input name="whShift" type="checkbox" /> Run water heater on solar surplus</label>
-            <label data-wh data-whshift>Water heater max power (kW) <input name="whMaxKw" type="number" step="0.1" min="0.1" max="6" value="1" /></label>
-            <label>Largest size to test (kWh) <input name="maxKwh" type="number" min="2" max="100" value="25" /></label>
-            <label>Size step (kWh) <input name="stepKwh" type="number" step="0.5" min="0.5" value="1" /></label>
-          </fieldset>
-        </form>
-      </section>
 
       <section class="card" id="results">
-        <h2><span class="step">4</span> Result</h2>
+        <h2><span class="step">3</span> Result</h2>
         <div id="results-body"><p class="hint">Load data in step 1 to see results.</p></div>
       </section>
     </main>
@@ -204,6 +215,8 @@
       Hourly simulation — real batteries also catch short spikes inside an hour, so treat savings as a slightly
       conservative estimate. Prices, degradation and future tariffs are your assumptions, not predictions.
     </footer>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
