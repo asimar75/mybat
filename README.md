@@ -41,6 +41,46 @@ autocomplete from every energy sensor HA has).
 > Run the app locally with `npm run dev` (which is `http://`), or use an `https://` HA URL
 > such as Nabu Casa.
 
+### Running it permanently on a Raspberry Pi
+
+For a Pi 3, 4 or 5 running **64-bit Raspberry Pi OS**. This does not work on Home Assistant OS,
+which doesn't allow installing software this way.
+
+```bash
+# 1. Node.js 22 (the version in apt is too old for this app)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+
+# 2. Get and build the app
+git clone https://github.com/asimar75/mybat.git ~/mybat
+cd ~/mybat
+npm ci
+npm run build
+
+# 3. Start it on boot as a service
+sudo tee /etc/systemd/system/mybat.service >/dev/null <<EOF
+[Unit]
+Description=mybat battery sizer
+After=network-online.target
+
+[Service]
+User=$USER
+WorkingDirectory=$HOME/mybat
+ExecStart=/usr/bin/npm run preview
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now mybat
+```
+
+Open `http://<pi-address>:8050` from any device on your network (find the address with
+`hostname -I`). Check it's running with `systemctl status mybat`.
+
+To update later: `cd ~/mybat && git pull && npm ci && npm run build && sudo systemctl restart mybat`.
+
 ### No Home Assistant?
 
 Use the **CSV file** tab. Columns: `timestamp`, `consumption_kwh` (total incl. EV) **or**

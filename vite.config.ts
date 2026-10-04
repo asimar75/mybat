@@ -4,7 +4,8 @@ export default defineConfig({
   // Relative base so the build works from any sub-path (GitHub Pages, a Capacitor shell, a local file server).
   base: './',
   // Fixed port, kept clear of Vite's default 5173. strictPort makes Vite stop with an error if 8050
-  // is taken, instead of silently moving to another port.
-  server: { port: 8050, strictPort: true },
-  preview: { port: 8050, strictPort: true },
+  // is taken, instead of silently moving to another port. host: true listens on the local network
+  // too, so the app can run on a Raspberry Pi and be opened from a laptop or phone.
+  server: { port: 8050, strictPort: true, host: true },
+  preview: { port: 8050, strictPort: true, host: true },
 });
