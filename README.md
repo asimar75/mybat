@@ -35,7 +35,22 @@ Open http://localhost:8050. Try **Demo data** first to learn the tool.
    sensors. Check them, then **Load history**.
 
 If your Energy dashboard isn't configured, type the statistic IDs manually (the fields
-autocomplete from every energy sensor HA has).
+autocomplete from every energy sensor HA has). Your sensor choices are saved in the browser per
+Home Assistant address, so the next connect restores them; **Reset to Energy dashboard** undoes that.
+
+### Checking the data
+
+Before the result, step 2 shows what was loaded so you can catch bad input:
+
+- **Automatic checks:** missing hours, solar at night or peaking far from midday (time-zone shift),
+  implausible household or EV hours (meter resets, Wh read as kWh), zero-consumption hours.
+  Click an example to jump to that day.
+- **Charts:** daily energy for the whole period, the average day, and any single day hour by hour.
+- **Monthly totals table:** compare it with Home Assistant → Energy → month view.
+- **Download all hourly data (CSV)** in the same format the CSV import reads, so you can fix values
+  in a spreadsheet and load them back.
+
+If a check fails, the result is flagged until the data is fixed.
 
 > **https vs http:** a browser won't let an `https://` page talk to an `http://` Home Assistant.
 > Run the app locally with `npm run dev` (which is `http://`), or use an `https://` HA URL
