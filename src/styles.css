@@ -527,3 +527,18 @@ tr.short td:last-child {
 .chart-box.tall {
   height: 300px;
 }
+
+.month-prices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.month-prices label {
+  font-size: 0.8rem;
+}
+.month-prices-wrap summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}

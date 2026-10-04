@@ -17,7 +17,7 @@ function input(): ExportInput {
   const rec = sweep(prepare(samples), template, sizeRange(10, 5), tariff, options, economics);
   return {
     rec, samples, dataLabel: 'demo year', tariff, economics, template, options,
-    scenario: { householdPct: 10, evPct: 0 }, waterHeater: { shift: false, maxKw: 1 }, currency: '€', failedChecks: [], generatedAt: new Date(2026, 0, 1),
+    scenario: { householdPct: 10, evPct: 0 }, waterHeater: { shift: false, maxKw: 1 }, reimbursement: null, currency: '€', failedChecks: [], generatedAt: new Date(2026, 0, 1),
   };
 }
 
@@ -43,5 +43,16 @@ describe('Excel export', () => {
     const hourly = strFromU8(files['xl/worksheets/sheet4.xml']);
     const firstTime = hourly.match(/<c r="A2"[^>]*><v>([\d.]+)<\/v>/)?.[1];
     expect(Number(firstTime)).toBeCloseTo(45658, 6);
+  });
+
+  it('adds reimbursement rows and monthly columns when used', async () => {
+    const { reimbursement } = await import('../engine/reimbursement');
+    const base = input();
+    const r = reimbursement(base.samples, { defaultPrice: 0.25, months: { '2025-07': 0.3 } });
+    const sheets = buildSheets({ ...base, reimbursement: r });
+    expect(JSON.stringify(sheets[0].data)).toContain('EV reimbursement per year');
+    expect(JSON.stringify(sheets[2].data[0])).toContain('EV reimbursement price');
+    const july = sheets[2].data.find((row) => JSON.stringify(row).includes('2025-07'))!;
+    expect(JSON.stringify(july)).toContain('"value":0.3');
   });
 });
