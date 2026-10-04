@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Size a home battery from your Home Assistant solar, consumption and EV charger history." />
+    <title>Battery Sizer</title>
+  </head>
+  <body>
+    <header class="top">
+      <h1>Battery Sizer</h1>
+      <p class="lede">
+        Simulates a home battery hour by hour against your real solar, consumption and EV charging history,
+        then tells you which size pays back — and which is just expensive.
+      </p>
+    </header>
+
+    <main>
+      <section class="card" id="source">
+        <h2><span class="step">1</span> Your energy data</h2>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="ha" aria-selected="true">Home Assistant</button>
+          <button role="tab" data-tab="csv" aria-selected="false">CSV file</button>
+          <button role="tab" data-tab="demo" aria-selected="false">Demo data</button>
+        </div>
+
+        <div class="tab-panel" data-panel="ha">
+          <p class="hint">
+            Reads the hourly statistics your Energy dashboard already records. Create a token in Home Assistant under
+            <b>your profile → Security → Long-lived access tokens</b>. The token stays in this browser and is only sent to
+            your Home Assistant.
+          </p>
+          <div class="grid">
+            <label>Home Assistant URL
+              <input id="ha-url" type="url" placeholder="http://homeassistant.local:8123" autocomplete="url" />
+            </label>
+            <label>Long-lived access token
+              <input id="ha-token" type="password" placeholder="eyJ0eXAiOi…" autocomplete="off" />
+            </label>
+            <label>History to analyse (days)
+              <input id="ha-days" type="number" min="7" max="1825" value="365" />
+            </label>
+          </div>
+          <label class="check"><input id="ha-remember" type="checkbox" /> Remember token on this device</label>
+          <div class="actions">
+            <button id="ha-connect" class="primary">Connect</button>
+          </div>
+
+          <div id="ha-mapping" hidden>
+            <h3>Sensors</h3>
+            <p class="hint">
+              Pre-filled from your Energy dashboard. Separate multiple statistics with commas. Start typing to search all
+              energy statistics.
+            </p>
+            <datalist id="ha-stats"></datalist>
+            <div class="grid">
+              <label>Grid import <input id="map-gi" list="ha-stats" /></label>
+              <label>Grid export <input id="map-ge" list="ha-stats" /></label>
+              <label>Solar production <input id="map-solar" list="ha-stats" /></label>
+              <label>EV charger <input id="map-ev" list="ha-stats" placeholder="none" /></label>
+              <label>Existing battery — discharge <input id="map-bo" list="ha-stats" placeholder="none" /></label>
+              <label>Existing battery — charge <input id="map-bi" list="ha-stats" placeholder="none" /></label>
+            </div>
+            <div class="actions">
+              <button id="ha-load" class="primary">Load history</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-panel="csv" hidden>
+          <p class="hint">
+            Columns: <code>timestamp</code>, <code>consumption_kwh</code> (total use <em>including</em> the car) or
+            <code>grid_import_kwh</code> + <code>grid_export_kwh</code>, plus optional <code>solar_kwh</code> and
+            <code>ev_kwh</code>. Any row interval works; rows are summed into hours.
+            <a href="#" id="csv-template">Download a template</a>.
+          </p>
+          <input id="csv-file" type="file" accept=".csv,.tsv,.txt,text/csv" />
+        </div>
+
+        <div class="tab-panel" data-panel="demo" hidden>
+          <p class="hint">
+            A synthetic year: 6 kWp solar at ~45°N, ~5,100 kWh household use, and an EV charged three evenings a week.
+            Use it to learn the tool before connecting your own data.
+          </p>
+          <div class="actions"><button id="demo-load" class="primary">Load demo year</button></div>
+        </div>
+
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <div id="summary"></div>
+      </section>
+
+      <section class="card" id="assumptions">
+        <h2><span class="step">2</span> Assumptions</h2>
+        <p class="hint">Defaults are placeholders. Replace them with your real tariff and a real installer quote — the answer is only as good as these numbers.</p>
+        <form id="settings" class="settings" onsubmit="return false">
+          <fieldset>
+            <legend>Tariff</legend>
+            <label>Currency symbol <input name="currency" value="€" maxlength="3" /></label>
+            <label class="check"><input name="useTimeOfUse" type="checkbox" /> Time-of-use (peak / off-peak) pricing</label>
+            <label data-flat>Import price per kWh <input name="importFlat" type="number" step="0.01" min="0" value="0.30" /></label>
+            <label data-tou>Peak price per kWh <input name="importPeak" type="number" step="0.01" min="0" value="0.36" /></label>
+            <label data-tou>Off-peak price per kWh <input name="importOffPeak" type="number" step="0.01" min="0" value="0.20" /></label>
+            <label data-tou>Peak starts (hour) <input name="peakStartHour" type="number" min="0" max="23" value="7" /></label>
+            <label data-tou>Peak ends (hour) <input name="peakEndHour" type="number" min="0" max="24" value="23" /></label>
+            <label>Export (feed-in) price per kWh <input name="exportPrice" type="number" step="0.01" min="0" value="0.08" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Battery &amp; cost</legend>
+            <label>Price per kWh of battery <input name="costPerKwh" type="number" step="10" min="0" value="450" /></label>
+            <label>Fixed cost (inverter, install) <input name="fixedCost" type="number" step="100" min="0" value="1500" /></label>
+            <label>Usable capacity % <input name="usablePct" type="number" min="50" max="100" value="95" /></label>
+            <label>Round-trip efficiency % <input name="efficiencyPct" type="number" min="50" max="100" value="90" /></label>
+            <label>Inverter max power (kW) <input name="inverterKw" type="number" step="0.5" min="0.5" value="5" /></label>
+            <label>Max power per usable kWh (C-rate) <input name="cRate" type="number" step="0.1" min="0.1" value="0.5" /></label>
+            <label>Lifetime (years) <input name="lifetimeYears" type="number" min="1" max="30" value="12" /></label>
+            <label>Capacity loss per year % <input name="degradationPct" type="number" step="0.5" min="0" max="10" value="2" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Strategy</legend>
+            <label>EV charger
+              <select name="evMode">
+                <option value="exclude">Battery never charges the car (recommended)</option>
+                <option value="include">Battery may charge the car</option>
+              </select>
+            </label>
+            <label class="check" data-tou><input name="gridCharge" type="checkbox" /> Charge battery from grid off-peak</label>
+            <label data-tou data-gridcharge>Grid-charge up to % <input name="gridChargePct" type="number" min="10" max="100" value="100" /></label>
+            <label>Largest size to test (kWh) <input name="maxKwh" type="number" min="2" max="100" value="25" /></label>
+            <label>Size step (kWh) <input name="stepKwh" type="number" step="0.5" min="0.5" value="1" /></label>
+          </fieldset>
+        </form>
+      </section>
+
+      <section class="card" id="results">
+        <h2><span class="step">3</span> Result</h2>
+        <div id="results-body"><p class="hint">Load data in step 1 to see results.</p></div>
+      </section>
+    </main>
+
+    <footer>
+      Hourly simulation — real batteries also catch short spikes inside an hour, so treat savings as a slightly
+      conservative estimate. Prices, degradation and future tariffs are your assumptions, not predictions.
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
