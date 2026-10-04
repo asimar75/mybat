@@ -28,6 +28,7 @@ function tokens() {
     series1: v('--series-1'),
     series2: v('--series-2'),
     series3: v('--series-3'),
+    series4: v('--series-4'),
     text: v('--text-secondary'),
     muted: v('--text-muted'),
     grid: v('--grid'),
@@ -170,7 +171,7 @@ export function renderCharts(rec: Recommendation, highlight: SweepRow | null, cu
   });
 }
 
-/** Input-validation charts: same entity → same colour everywhere (house blue, EV orange, solar aqua). */
+/** Input-validation charts: same entity → same colour everywhere (house blue, EV orange, solar aqua, water heater yellow). */
 export function renderDataCharts(
   daily: DayTotals[],
   profile: HourProfile,
@@ -178,10 +179,12 @@ export function renderDataCharts(
   onPickDay: (day: string) => void,
 ) {
   const t = tokens();
-  const entities = (pick: (k: 'house' | 'ev' | 'solar') => number[]) => [
+  const withWh = day.some((s) => s.wh !== undefined) || profile.wh.some((v) => v > 0);
+  const entities = (pick: (k: 'house' | 'ev' | 'solar' | 'wh') => number[]) => [
     { ...line('House', pick('house'), t.series1), tension: 0 },
     { ...line('EV charger', pick('ev'), t.series2), tension: 0 },
     { ...line('Solar', pick('solar'), t.series3), tension: 0 },
+    ...(withWh ? [{ ...line('Water heater', pick('wh'), t.series4), tension: 0 }] : []),
   ];
   const kwhTooltip = (o: ReturnType<typeof baseOptions>, title: (label: string) => string) => ({
     ...o.plugins,
@@ -241,7 +244,7 @@ export function renderDataCharts(
     type: 'line',
     data: {
       labels: dayLabels,
-      datasets: entities((k) => day.map((s) => s[k])).map((d) => ({ ...d, pointRadius: 2 })),
+      datasets: entities((k) => day.map((s) => s[k] ?? 0)).map((d) => ({ ...d, pointRadius: 2 })),
     },
     options: {
       ...dayOpts,

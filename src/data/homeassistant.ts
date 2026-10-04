@@ -166,6 +166,14 @@ export function looksLikeEv(text: string): boolean {
   return EV_PATTERN.test(text.replace(/[._]/g, ' '));
 }
 
+// English plus common Spanish/French/German/Dutch/Italian names, and popular heat-pump water heater brands.
+const WATER_HEATER_PATTERN =
+  /\b(water[ _]?heater|hot[ _]?water|dhw|boiler|geyser|cylinder|ecs|acs|termo|termo ?acumulador|calentador|chauffe[ _]?eau|ballon|warmwasser|warmtepompboiler|scaldabagno|aquarea|ariston|nuos|thermor|ecodan|atlantic)\b/i;
+
+export function looksLikeWaterHeater(text: string): boolean {
+  return WATER_HEATER_PATTERN.test(text.replace(/[._]/g, ' '));
+}
+
 /**
  * Reads the Energy dashboard preferences into a flat selection. Defensive about shape because
  * the prefs format has changed between Home Assistant releases.

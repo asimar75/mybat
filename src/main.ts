@@ -1,13 +1,13 @@
 import './styles.css';
-import { applyScenario, describeScenario, isNoChange, type Scenario } from './engine/scenario';
+import { applyScenario, describeScenario, isNoChange, shiftWaterHeater, type Scenario } from './engine/scenario';
 import { prepare, simulate, type PreparedData } from './engine/simulate';
 import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/sweep';
 import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
 import { CSV_TEMPLATE, parseCsv } from './data/csv';
 import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
-import { HomeAssistantClient, looksLikeEv, parseEnergyPrefs } from './data/homeassistant';
-import { dailyTotals, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
+import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
+import { dailyTotals, hasWaterHeater, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, loadDataset, saveDataset } from './data/persist';
 import { renderCharts, renderDataCharts } from './ui/charts';
 import { exportExcel } from './ui/excel';
@@ -49,6 +49,9 @@ let lastRec: Recommendation | null = null;
 /** Data the result is computed from: the measured history, or a what-if version of it. */
 let simData: PreparedData | null = null;
 let simKey = '';
+/** The same data with the water-heater option flipped, for the with/without comparison. */
+let altData: PreparedData | null = null;
+let altKey = '';
 let dataLabel = '';
 let lastCfg: ReturnType<typeof readSettings> | null = null;
 
@@ -73,6 +76,8 @@ function setData(samples: HourSample[], label: string, notes: string[] = [], res
   }
   data = prepare(samples);
   simData = null;
+  altData = null;
+  syncVisibility();
   dataNotes = notes;
   dataLabel = label;
   // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
@@ -122,6 +127,7 @@ const mapFields = {
   gridExport: $<HTMLInputElement>('#map-ge'),
   solar: $<HTMLInputElement>('#map-solar'),
   ev: $<HTMLInputElement>('#map-ev'),
+  wh: $<HTMLInputElement>('#map-wh'),
   batteryOut: $<HTMLInputElement>('#map-bo'),
   batteryIn: $<HTMLInputElement>('#map-bi'),
 };
@@ -189,6 +195,10 @@ $('#ha-connect').addEventListener('click', async () => {
       sel.devices.find((d) => looksLikeEv(`${d.id} ${d.name}`))?.id ??
       stats.find((s) => looksLikeEv(`${s.statistic_id} ${s.name ?? ''}`))?.statistic_id ??
       '';
+    const whGuess =
+      sel.devices.find((d) => looksLikeWaterHeater(`${d.id} ${d.name}`))?.id ??
+      stats.find((s) => looksLikeWaterHeater(`${s.statistic_id} ${s.name ?? ''}`))?.statistic_id ??
+      '';
     detectedSensors = {
       gridImport: sel.gridImport.join(', '),
       gridExport: sel.gridExport.join(', '),
@@ -196,6 +206,7 @@ $('#ha-connect').addEventListener('click', async () => {
       batteryOut: sel.batteryOut.join(', '),
       batteryIn: sel.batteryIn.join(', '),
       ev: evGuess,
+      wh: whGuess,
     };
     const saved = loadSavedSensors();
     fillSensorFields(saved ?? detectedSensors);
@@ -233,8 +244,9 @@ $('#ha-load').addEventListener('click', async () => {
     batteryOut: splitIds(mapFields.batteryOut.value),
     batteryIn: splitIds(mapFields.batteryIn.value),
     ev: mapFields.ev.value.trim(),
+    wh: mapFields.wh.value.trim(),
   };
-  const ids = [...new Set([...sel.gridImport, ...sel.gridExport, ...sel.solar, ...sel.batteryOut, ...sel.batteryIn, sel.ev].filter(Boolean))];
+  const ids = [...new Set([...sel.gridImport, ...sel.gridExport, ...sel.solar, ...sel.batteryOut, ...sel.batteryIn, sel.ev, sel.wh ?? ''].filter(Boolean))];
   saveSensors();
   const days = Math.max(7, Math.min(1825, Number(haDays.value) || 365));
   const end = new Date();
@@ -247,6 +259,7 @@ $('#ha-load').addEventListener('click', async () => {
     if (report.missingHours > 0) notes.push(`${report.missingHours.toLocaleString()} hours had no data (Home Assistant offline?) and were skipped.`);
     if (report.evClampedHours > 0) notes.push(`In ${report.evClampedHours} hours the EV meter read more than total consumption — check that the EV sensor is in kWh and the grid sensors are complete.`);
     if (!sel.ev) notes.push('No EV charger selected: all consumption is treated as household load.');
+    if (report.whClampedHours > 0) notes.push(`In ${report.whClampedHours} hours the water heater meter read more than the remaining consumption — check that its sensor is an energy (kWh) total.`);
     if (sel.solar.length === 0) notes.push('No solar sensor selected: the battery can only help through off-peak grid charging.');
     setData(report.samples, `${days} days from Home Assistant`, notes);
   } catch (err) {
@@ -324,7 +337,8 @@ function readSettings() {
     householdPct: Math.max(-100, n('householdPct', 0)),
     evPct: Math.max(-100, n('evPct', 0)),
   };
-  return { tariff, options, economics, template, sizes, scenario, currency: s('currency') || '€' };
+  const waterHeater = { shift: b('whShift'), maxKw: Math.max(0.1, n('whMaxKw', 1)) };
+  return { tariff, options, economics, template, sizes, scenario, waterHeater, currency: s('currency') || '€' };
 }
 
 function syncVisibility() {
@@ -333,6 +347,11 @@ function syncVisibility() {
   form.querySelectorAll<HTMLElement>('[data-tou]').forEach((el) => (el.hidden = !tou));
   form.querySelectorAll<HTMLElement>('[data-flat]').forEach((el) => (el.hidden = tou));
   form.querySelectorAll<HTMLElement>('[data-gridcharge]').forEach((el) => (el.hidden = !tou || !gridCharge));
+  // Water-heater options only make sense when the data has a separately metered water heater.
+  const wh = data !== null && hasWaterHeater(data.samples);
+  const whShift = (form.elements.namedItem('whShift') as HTMLInputElement).checked;
+  form.querySelectorAll<HTMLElement>('[data-wh]').forEach((el) => (el.hidden = !wh));
+  form.querySelectorAll<HTMLElement>('[data-whshift]').forEach((el) => (el.hidden = !wh || !whShift));
 }
 
 restoreSettings();
@@ -356,7 +375,7 @@ function renderSummary() {
   if (!data) return;
   const s = data.samples;
   const f = 8760 / s.length;
-  const sum = (k: 'house' | 'solar' | 'ev') => s.reduce((a, x) => a + x[k], 0) * f;
+  const sum = (k: 'house' | 'solar' | 'ev' | 'wh') => s.reduce((a, x) => a + (x[k] ?? 0), 0) * f;
   const notes = [...dataNotes];
   if (data.days < 330) {
     notes.unshift(
@@ -368,6 +387,7 @@ function renderSummary() {
       <div><dt>Period</dt><dd>${dateRange(s[0].t, s[s.length - 1].t)}<small>${data.days} days</small></dd></div>
       <div><dt>Household use / yr</dt><dd>${kwh(sum('house'))}</dd></div>
       <div><dt>EV charging / yr</dt><dd>${kwh(sum('ev'))}</dd></div>
+      ${hasWaterHeater(s) ? `<div><dt>Water heater / yr</dt><dd>${kwh(sum('wh'))}</dd></div>` : ''}
       <div><dt>Solar / yr</dt><dd>${kwh(sum('solar'))}</dd></div>
     </dl>
     ${notes.map((n) => `<p class="note">${escapeHtml(n)}</p>`).join('')}`;
@@ -376,16 +396,45 @@ function renderSummary() {
 function recompute() {
   if (!data) return;
   const cfg = readSettings();
-  // Re-prepare only when the scenario changes; tariff or battery edits reuse it.
-  const key = `${cfg.scenario.householdPct}|${cfg.scenario.evPct}`;
-  if (!simData || key !== simKey) {
-    simData = isNoChange(cfg.scenario) ? data : prepare(applyScenario(data.samples, cfg.scenario));
-    simKey = key;
+  const measured = data;
+  const withWh = hasWaterHeater(measured.samples);
+  const shiftOn = withWh && cfg.waterHeater.shift;
+  const build = (shift: boolean) => {
+    if (!shift && isNoChange(cfg.scenario)) return measured;
+    const scaled = applyScenario(measured.samples, cfg.scenario);
+    return prepare(shift ? shiftWaterHeater(scaled, cfg.waterHeater.maxKw) : scaled);
+  };
+  // Re-prepare only when the data-shaping inputs change; tariff or battery edits reuse it.
+  const keyFor = (shift: boolean) => `${cfg.scenario.householdPct}|${cfg.scenario.evPct}|${shift}|${cfg.waterHeater.maxKw}`;
+  if (!simData || keyFor(shiftOn) !== simKey) {
+    simData = build(shiftOn);
+    simKey = keyFor(shiftOn);
   }
   const rec = sweep(simData, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
+  let whItem = '';
+  if (withWh) {
+    if (!altData || keyFor(!shiftOn) !== altKey) {
+      altData = build(!shiftOn);
+      altKey = keyFor(!shiftOn);
+    }
+    const alt = sweep(altData, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
+    whItem = waterHeaterInsight(shiftOn ? rec : alt, shiftOn ? alt : rec, shiftOn, cfg.currency);
+  }
   lastRec = rec;
   lastCfg = cfg;
-  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears, scenarioNote(rec, cfg));
+  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears, scenarioNote(rec, cfg), whItem);
+}
+
+/** Compares the result with the water heater on solar surplus vs. at its measured times. */
+function waterHeaterInsight(shifted: Recommendation, measuredTiming: Recommendation, shiftOn: boolean, currency: string): string {
+  const save = measuredTiming.baseline.annual.netCost - shifted.baseline.annual.netCost;
+  const best = (r: Recommendation) => (r.best ? `${r.best.nominalKwh} kWh (${money(r.best.netBenefit, currency)} net)` : 'no size pays back');
+  if (Math.abs(save) < 5) {
+    return `<b>Water heater:</b> moving it to solar hours changes little (${money(save, currency)} a year) — it already runs when solar is available, or there's little surplus to use.`;
+  }
+  return shiftOn
+    ? `<b>Water heater on solar surplus</b> saves ${money(save, currency)} a year before any battery, compared with its measured timing. Best battery: ${best(measuredTiming)} with the measured timing, ${best(shifted)} with it shifted (shown here).`
+    : `<b>Try “Run water heater on solar surplus”</b> in Strategy: it would save ${money(save, currency)} a year with no battery at all, and the best battery would be ${best(shifted)} instead of ${best(measuredTiming)}. A timer or solar diverter on the heater does this.`;
 }
 
 function verdict(rec: Recommendation, currency: string, lifetime: number): string {
@@ -414,9 +463,9 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
     </div>`;
 }
 
-function insights(rec: Recommendation, focus: SweepRow | null, currency: string, evMode: string): string {
+function insights(rec: Recommendation, focus: SweepRow | null, currency: string, evMode: string, extra: string[] = []): string {
   if (!data) return '';
-  const items: string[] = [];
+  const items: string[] = [...extra];
   const base = rec.baseline.annual;
   if (rec.knee) {
     items.push(
@@ -492,7 +541,7 @@ function scenarioNote(rec: Recommendation, cfg: ReturnType<typeof readSettings>)
     The result below compares batteries under this scenario. Set both changes to 0 to go back to your measured data.</p>`;
 }
 
-function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number, scenarioHtml = '') {
+function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number, scenarioHtml = '', whItem = '') {
   const focus = rec.best ?? rec.knee;
   const dataWarning = failedChecks.length
     ? `<p class="note"><b>Check your data first.</b> Step 2 flagged: ${escapeHtml(failedChecks.join('; '))}.
@@ -502,7 +551,7 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
     ${dataWarning}
     ${scenarioHtml}
     ${verdict(rec, currency, lifetime)}
-    ${insights(rec, focus, currency, evMode)}
+    ${insights(rec, focus, currency, evMode, whItem ? [whItem] : [])}
     <div class="charts">
       <figure>
         <figcaption>Lifetime savings vs. battery cost<small>Savings above the cost line means the battery pays for itself</small></figcaption>
@@ -534,7 +583,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
 // ---------- step 2: check your data ----------
 
 let daily: DayTotals[] = [];
-let profile: HourProfile = { house: [], ev: [], solar: [] };
+let profile: HourProfile = { house: [], ev: [], wh: [], solar: [] };
 let selectedDay = '';
 const dayPick = $<HTMLInputElement>('#day-pick');
 
@@ -579,29 +628,21 @@ function renderChecks() {
 function renderMonthTable() {
   if (!data) return;
   const months = monthlyTotals(data.samples);
+  const withWh = hasWaterHeater(data.samples);
   const fmt = (v: number) => num1(v);
-  const total = months.reduce(
-    (a, m) => ({
-      house: a.house + m.house,
-      ev: a.ev + m.ev,
-      solar: a.solar + m.solar,
-      gridImport: a.gridImport + m.gridImport,
-      gridExport: a.gridExport + m.gridExport,
-      hours: a.hours + m.hours,
-      expectedHours: a.expectedHours + m.expectedHours,
-    }),
-    { house: 0, ev: 0, solar: 0, gridImport: 0, gridExport: 0, hours: 0, expectedHours: 0 },
-  );
+  const keys = ['house', 'ev', 'wh', 'solar', 'gridImport', 'gridExport', 'hours', 'expectedHours'] as const;
+  const total = Object.fromEntries(keys.map((k) => [k, months.reduce((a, m) => a + m[k], 0)])) as Record<(typeof keys)[number], number>;
   const row = (label: string, m: typeof total, cls = '') => {
     const coverage = m.expectedHours ? m.hours / m.expectedHours : 1;
     return `<tr${cls || coverage < 0.98 ? ` class="${cls || 'short'}"` : ''}>
-      <td>${label}</td><td>${fmt(m.house)}</td><td>${fmt(m.ev)}</td><td>${fmt(m.house + m.ev)}</td>
-      <td>${fmt(m.solar)}</td><td>${fmt(m.gridImport)}</td><td>${fmt(m.gridExport)}</td><td>${pct(coverage)}</td></tr>`;
+      <td>${label}</td><td>${fmt(m.house)}</td><td>${fmt(m.ev)}</td>${withWh ? `<td>${fmt(m.wh)}</td>` : ''}
+      <td>${fmt(m.house + m.ev + m.wh)}</td><td>${fmt(m.solar)}</td><td>${fmt(m.gridImport)}</td><td>${fmt(m.gridExport)}</td>
+      <td>${pct(coverage)}</td></tr>`;
   };
   $('#month-table').innerHTML = `
     <table>
       <thead><tr>
-        <th>Month</th><th>House kWh</th><th>EV kWh</th><th>Total use kWh</th><th>Solar kWh</th>
+        <th>Month</th><th>House kWh</th><th>EV kWh</th>${withWh ? '<th>Water heater kWh</th>' : ''}<th>Total use kWh</th><th>Solar kWh</th>
         <th>Grid import* kWh</th><th>Grid export* kWh</th><th>Hours with data</th>
       </tr></thead>
       <tbody>
@@ -616,16 +657,20 @@ function renderMonthTable() {
 }
 
 function renderDayTable(samples: HourSample[]) {
+  const withWh = samples.some((s) => s.wh !== undefined);
   const cell = (v: number, bad: boolean) => `<td${bad ? ' class="flag"' : ''}>${v.toFixed(2)}</td>`;
   $('#day-table').innerHTML = samples.length
     ? `<table>
-        <thead><tr><th>Hour</th><th>House kWh</th><th>EV kWh</th><th>Solar kWh</th><th>Grid import* kWh</th><th>Grid export* kWh</th></tr></thead>
+        <thead><tr><th>Hour</th><th>House kWh</th><th>EV kWh</th>${withWh ? '<th>Water heater kWh</th>' : ''}<th>Solar kWh</th>
+          <th>Grid import* kWh</th><th>Grid export* kWh</th></tr></thead>
         <tbody>${samples
           .map((s) => {
             const h = new Date(s.t).getHours();
-            const load = s.house + s.ev;
+            const wh = s.wh ?? 0;
+            const load = s.house + s.ev + wh;
             return `<tr><td>${new Date(s.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</td>
               ${cell(s.house, s.house > LIMITS.houseKwh || load < 0.01)}${cell(s.ev, s.ev > LIMITS.evKwh)}
+              ${withWh ? cell(wh, wh > LIMITS.whKwh) : ''}
               ${cell(s.solar, h <= 3 && s.solar > LIMITS.nightSolarKwh)}
               ${cell(Math.max(0, load - s.solar), false)}${cell(Math.max(0, s.solar - load), false)}</tr>`;
           })
@@ -690,6 +735,7 @@ $('#results-body').addEventListener('click', async (e) => {
         template: lastCfg.template,
         options: lastCfg.options,
         scenario: lastCfg.scenario,
+        waterHeater: lastCfg.waterHeater,
         currency: lastCfg.currency,
         failedChecks,
         generatedAt: new Date(),

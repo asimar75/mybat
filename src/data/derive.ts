@@ -11,6 +11,8 @@ export interface StatSelection {
   batteryIn: string[];
   /** Statistic id of the EV charger, or empty for none. */
   ev: string;
+  /** Statistic id of a separately metered water heater, or empty/absent for none. */
+  wh?: string;
 }
 
 export interface DeriveReport {
@@ -19,6 +21,8 @@ export interface DeriveReport {
   missingHours: number;
   /** Hours where the EV meter read higher than total consumption (meter mismatch). */
   evClampedHours: number;
+  /** Hours where EV + water heater read higher than total consumption. */
+  whClampedHours: number;
 }
 
 function toMs(start: number | string): number {
@@ -49,25 +53,31 @@ export function deriveSamples(stats: Record<string, StatisticPoint[]>, sel: Stat
   const bo = sumOf(sel.batteryOut);
   const bi = sumOf(sel.batteryIn);
   const ev = sel.ev ? indexByHour(stats[sel.ev]) : new Map<number, number>();
+  const wh = sel.wh ? indexByHour(stats[sel.wh]) : null;
 
   const primary = [...gi, ...ge, ...so];
   const hours = new Set<number>();
   for (const m of primary) for (const t of m.keys()) hours.add(t);
   const sorted = [...hours].sort((a, b) => a - b);
-  if (sorted.length === 0) return { samples: [], missingHours: 0, evClampedHours: 0 };
+  if (sorted.length === 0) return { samples: [], missingHours: 0, evClampedHours: 0, whClampedHours: 0 };
 
   const total = (maps: Map<number, number>[], t: number) => maps.reduce((acc, m) => acc + (m.get(t) ?? 0), 0);
   const span = (sorted[sorted.length - 1] - sorted[0]) / HOUR_MS + 1;
 
   let evClampedHours = 0;
+  let whClampedHours = 0;
   const samples: HourSample[] = sorted.map((t) => {
     const solar = total(so, t);
     const consumption = Math.max(0, total(gi, t) - total(ge, t) + solar + total(bo, t) - total(bi, t));
     let evKwh = ev.get(t) ?? 0;
     if (evKwh > consumption + 0.05) evClampedHours++;
     evKwh = Math.min(evKwh, consumption);
-    return { t, solar, ev: evKwh, house: consumption - evKwh };
+    if (!wh) return { t, solar, ev: evKwh, house: consumption - evKwh };
+    let whKwh = wh.get(t) ?? 0;
+    if (whKwh > consumption - evKwh + 0.05) whClampedHours++;
+    whKwh = Math.min(whKwh, consumption - evKwh);
+    return { t, solar, ev: evKwh, wh: whKwh, house: consumption - evKwh - whKwh };
   });
 
-  return { samples, missingHours: Math.max(0, span - sorted.length), evClampedHours };
+  return { samples, missingHours: Math.max(0, span - sorted.length), evClampedHours, whClampedHours };
 }

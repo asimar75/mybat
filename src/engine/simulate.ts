@@ -119,7 +119,8 @@ export function simulate(
       dayWasEmpty = false;
     }
 
-    const house = Math.max(0, s.house);
+    // The water heater is household load for dispatch; it's metered separately only so it can be shifted.
+    const house = Math.max(0, s.house) + Math.max(0, s.wh ?? 0);
     const ev = Math.max(0, s.ev);
     const solar = Math.max(0, s.solar);
     totalLoad += house + ev;

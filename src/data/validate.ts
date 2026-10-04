@@ -10,6 +10,8 @@ import { HOUR_MS } from './derive';
 export interface Totals {
   house: number;
   ev: number;
+  /** Water heater (0 when it isn't metered separately). */
+  wh: number;
   solar: number;
   /** Grid import with no battery (hourly netting of load against solar). */
   gridImport: number;
@@ -34,6 +36,7 @@ export interface HourProfile {
   /** Average kWh in each local hour of the day, index 0–23. */
   house: number[];
   ev: number[];
+  wh: number[];
   solar: number[];
 }
 
@@ -60,13 +63,15 @@ function localMonth(t: number): string {
 }
 
 function emptyTotals(): Totals {
-  return { house: 0, ev: 0, solar: 0, gridImport: 0, gridExport: 0, hours: 0 };
+  return { house: 0, ev: 0, wh: 0, solar: 0, gridImport: 0, gridExport: 0, hours: 0 };
 }
 
 function add(totals: Totals, s: HourSample) {
-  const load = s.house + s.ev;
+  const wh = s.wh ?? 0;
+  const load = s.house + s.ev + wh;
   totals.house += s.house;
   totals.ev += s.ev;
+  totals.wh += wh;
   totals.solar += s.solar;
   totals.gridImport += Math.max(0, load - s.solar);
   totals.gridExport += Math.max(0, s.solar - load);
@@ -113,21 +118,27 @@ export function monthlyTotals(samples: HourSample[]): MonthTotals[] {
 }
 
 export function hourProfile(samples: HourSample[]): HourProfile {
-  const sum = { house: new Array(24).fill(0), ev: new Array(24).fill(0), solar: new Array(24).fill(0) };
+  const sum = { house: new Array(24).fill(0), ev: new Array(24).fill(0), wh: new Array(24).fill(0), solar: new Array(24).fill(0) };
   const count = new Array(24).fill(0);
   for (const s of samples) {
     const h = new Date(s.t).getHours();
     sum.house[h] += s.house;
     sum.ev[h] += s.ev;
+    sum.wh[h] += s.wh ?? 0;
     sum.solar[h] += s.solar;
     count[h]++;
   }
   const avg = (arr: number[]) => arr.map((v, h) => (count[h] ? v / count[h] : 0));
-  return { house: avg(sum.house), ev: avg(sum.ev), solar: avg(sum.solar) };
+  return { house: avg(sum.house), ev: avg(sum.ev), wh: avg(sum.wh), solar: avg(sum.solar) };
 }
 
 /** Thresholds for "this hour looks wrong". A home rarely averages 12 kW for a full hour; 22 kW is the largest AC home charger. */
-export const LIMITS = { houseKwh: 12, evKwh: 22, nightSolarKwh: 0.05 };
+export const LIMITS = { houseKwh: 12, evKwh: 22, whKwh: 6, nightSolarKwh: 0.05 };
+
+/** True when the dataset has a separately metered water heater. */
+export function hasWaterHeater(samples: HourSample[]): boolean {
+  return samples.some((s) => s.wh !== undefined);
+}
 
 export function runChecks(samples: HourSample[]): Check[] {
   const checks: Check[] = [];
@@ -229,8 +240,31 @@ export function runChecks(samples: HourSample[]): Check[] {
     examples: evSpikes.slice(0, 5).map((s) => s.t),
   });
 
-  // 6. Hours with zero load → data missing rather than a real zero (a home always has base load).
-  const zero = samples.filter((s) => s.house + s.ev < 0.01);
+  // 6. Water heater beyond what a domestic unit draws (heat pump plus resistive backup stays under ~6 kW).
+  if (hasWaterHeater(samples)) {
+    const whTotal = samples.reduce((a, s) => a + (s.wh ?? 0), 0);
+    const whSpikes = samples.filter((s) => (s.wh ?? 0) > LIMITS.whKwh);
+    checks.push({
+      id: 'water-heater',
+      ok: whTotal > 0 && whSpikes.length === 0,
+      title:
+        whTotal === 0
+          ? 'Water heater sensor reads zero'
+          : whSpikes.length === 0
+            ? 'Water heater looks plausible'
+            : `${hours(whSpikes.length)} of water heating above ${LIMITS.whKwh} kWh`,
+      detail:
+        whTotal === 0
+          ? 'The selected water heater sensor never reported energy. Check it is the energy (kWh) total, not power or temperature.'
+          : whSpikes.length === 0
+            ? `No hour exceeds ${LIMITS.whKwh} kWh, the most a domestic water heater draws.`
+            : 'No domestic water heater draws this much in an hour. Check the sensor is an energy (kWh) total.',
+      examples: whSpikes.slice(0, 5).map((s) => s.t),
+    });
+  }
+
+  // 7. Hours with zero load → data missing rather than a real zero (a home always has base load).
+  const zero = samples.filter((s) => s.house + s.ev + (s.wh ?? 0) < 0.01);
   const zeroShare = zero.length / samples.length;
   checks.push({
     id: 'zero-load',
@@ -259,8 +293,12 @@ function isoWithOffset(t: number): string {
 
 /** Hourly data in the same format the CSV import reads, so an export can be edited and re-imported. */
 export function toCsv(samples: HourSample[]): string {
-  const rows = samples.map(
-    (s) => `${isoWithOffset(s.t)},${(s.house + s.ev).toFixed(3)},${s.solar.toFixed(3)},${s.ev.toFixed(3)}`,
-  );
-  return ['timestamp,consumption_kwh,solar_kwh,ev_kwh', ...rows].join('\n') + '\n';
+  const withWh = hasWaterHeater(samples);
+  const rows = samples.map((s) => {
+    const wh = s.wh ?? 0;
+    const base = `${isoWithOffset(s.t)},${(s.house + s.ev + wh).toFixed(3)},${s.solar.toFixed(3)},${s.ev.toFixed(3)}`;
+    return withWh ? `${base},${wh.toFixed(3)}` : base;
+  });
+  const header = `timestamp,consumption_kwh,solar_kwh,ev_kwh${withWh ? ',water_heater_kwh' : ''}`;
+  return [header, ...rows].join('\n') + '\n';
 }

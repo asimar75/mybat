@@ -27,6 +27,8 @@ interface Encoded {
   house: number[];
   ev: number[];
   solar: number[];
+  /** Water heater, only when the dataset has one. */
+  wh?: number[];
 }
 
 const KEY = 'mybat.dataset';
@@ -44,6 +46,7 @@ export function encodeDataset(d: SavedDataset): string {
     house: d.samples.map((s) => round(s.house)),
     ev: d.samples.map((s) => round(s.ev)),
     solar: d.samples.map((s) => round(s.solar)),
+    ...(d.samples.some((s) => s.wh !== undefined) ? { wh: d.samples.map((s) => round(s.wh ?? 0)) } : {}),
   };
   return JSON.stringify(enc);
 }
@@ -54,7 +57,14 @@ export function decodeDataset(raw: string): SavedDataset | null {
     if (e?.v !== 1 || !Array.isArray(e.h)) return null;
     const n = e.h.length;
     if (e.house.length !== n || e.ev.length !== n || e.solar.length !== n) return null;
-    const samples = e.h.map((h, i) => ({ t: e.t0 + h * HOUR_MS, house: e.house[i], ev: e.ev[i], solar: e.solar[i] }));
+    if (e.wh && e.wh.length !== n) return null;
+    const samples = e.h.map((h, i) => ({
+      t: e.t0 + h * HOUR_MS,
+      house: e.house[i],
+      ev: e.ev[i],
+      solar: e.solar[i],
+      ...(e.wh ? { wh: e.wh[i] } : {}),
+    }));
     return { samples, label: e.label, notes: e.notes ?? [], savedAt: e.savedAt };
   } catch {
     return null;

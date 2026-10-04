@@ -24,7 +24,41 @@ export function applyScenario(samples: HourSample[], s: Scenario): HourSample[] 
   if (isNoChange(s)) return samples;
   const h = factor(s.householdPct);
   const e = factor(s.evPct);
-  return samples.map((x) => ({ t: x.t, solar: x.solar, house: x.house * h, ev: x.ev * e }));
+  return samples.map((x) => ({ t: x.t, solar: x.solar, house: x.house * h, ev: x.ev * e, wh: (x.wh ?? 0) * h }));
+}
+
+/**
+ * Moves each day's water-heater energy into hours with surplus solar (after house and EV),
+ * at most `maxKw` per hour, earliest sunny hours first. Whatever doesn't fit keeps its original
+ * timing, scaled down. Daily energy is unchanged; tank heat-loss differences are ignored.
+ */
+export function shiftWaterHeater(samples: HourSample[], maxKw: number): HourSample[] {
+  if (!samples.some((s) => (s.wh ?? 0) > 0)) return samples;
+  const out = samples.map((s) => ({ ...s, wh: s.wh ?? 0 }));
+  const limit = Math.max(0, maxKw);
+  let i = 0;
+  while (i < out.length) {
+    const day = new Date(out[i].t).toDateString();
+    let j = i;
+    while (j < out.length && new Date(out[j].t).toDateString() === day) j++;
+    const hours = out.slice(i, j);
+    const energy = hours.reduce((a, s) => a + s.wh, 0);
+    if (energy > 0) {
+      const shifted = new Array(hours.length).fill(0);
+      let left = energy;
+      hours.forEach((s, k) => {
+        const surplus = s.solar - s.house - s.ev;
+        if (left > 0 && surplus > 0) {
+          shifted[k] = Math.min(surplus, limit, left);
+          left -= shifted[k];
+        }
+      });
+      const rest = left / energy; // share that keeps its original timing
+      hours.forEach((s, k) => (s.wh = shifted[k] + s.wh * rest));
+    }
+    i = j;
+  }
+  return out;
 }
 
 function signed(pct: number): string {
