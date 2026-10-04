@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Try **Demo data** first to learn the tool.
+Open http://localhost:8050. Try **Demo data** first to learn the tool.
 
 ### Connecting Home Assistant
 
