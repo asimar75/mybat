@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { prepare, simulate, isPeakHour } from './simulate';
+import { createTrace, prepare, simulate, isPeakHour } from './simulate';
 import { lifetimeMultiplier, sizeRange, sweep } from './sweep';
 import type { BatterySpec, HourSample, SimOptions, Tariff } from './types';
 import { demoYear } from '../data/demo';
@@ -138,5 +138,27 @@ describe('helpers', () => {
   });
   it('sizeRange starts at zero', () => {
     expect(sizeRange(3, 1)).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('simulate trace', () => {
+  it('records hourly charge, discharge to house and EV, and state of charge', () => {
+    const data = prepare(hours([[0, 6], [1, 0, 7]]));
+    const trace = createTrace(2);
+    simulate(data, { ...ideal, nominalKwh: 5 }, flat, { ...opts, evMode: 'include' }, trace);
+    expect(trace.chargeSolar[0]).toBeCloseTo(5);
+    expect(trace.gridExport[0]).toBeCloseTo(1);
+    expect(trace.soc[0]).toBeCloseTo(5);
+    expect(trace.toHouse[1]).toBeCloseTo(1);
+    expect(trace.toEv[1]).toBeCloseTo(4);
+    expect(trace.gridImport[1]).toBeCloseTo(3);
+    expect(trace.soc[1]).toBeCloseTo(0);
+  });
+
+  it('never sends battery energy to the EV in exclude mode', () => {
+    const trace = createTrace(2);
+    simulate(prepare(hours([[0, 6], [1, 0, 7]])), { ...ideal, nominalKwh: 5 }, flat, opts, trace);
+    expect(trace.toEv[1]).toBe(0);
+    expect(trace.toHouse[1]).toBeCloseTo(1);
   });
 });

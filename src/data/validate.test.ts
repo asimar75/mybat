@@ -78,6 +78,24 @@ describe('runChecks', () => {
   });
 });
 
+describe('water heater', () => {
+  it('is counted in totals and profile, and spikes are flagged', () => {
+    const samples = day({ 3: { wh: 1.2 } as Partial<HourSample>, 4: { wh: 9 } as Partial<HourSample> });
+    const [d] = dailyTotals(samples);
+    expect(d.wh).toBeCloseTo(10.2);
+    expect(hourProfile(samples).wh[3]).toBeCloseTo(1.2);
+    expect(byId(samples, 'water-heater').ok).toBe(false);
+    expect(byId(day(), 'water-heater')).toBeUndefined(); // no separate meter → no check
+  });
+
+  it('round-trips through CSV', () => {
+    const samples = day().map((s, i) => ({ ...s, wh: i === 2 ? 0.7 : 0 }));
+    const back = parseCsv(toCsv(samples)).samples;
+    expect(back[2].wh).toBeCloseTo(0.7, 3);
+    expect(back[2].house).toBeCloseTo(samples[2].house, 3);
+  });
+});
+
 describe('toCsv', () => {
   it('round-trips through the CSV importer', () => {
     const samples = [...day(), ...day({}, 1)];

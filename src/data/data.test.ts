@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCsv, CSV_TEMPLATE } from './csv';
 import { deriveSamples } from './derive';
-import { looksLikeEv, parseEnergyPrefs, toWebSocketUrl } from './homeassistant';
+import { looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs, toWebSocketUrl } from './homeassistant';
 
 describe('parseCsv', () => {
   it('parses the template', () => {
@@ -10,6 +10,8 @@ describe('parseCsv', () => {
     const evening = r.samples[3];
     expect(evening.ev).toBeCloseTo(7.2);
     expect(evening.house).toBeCloseTo(1.2);
+    expect(r.samples[1].wh).toBeCloseTo(0.7);
+    expect(r.samples[1].house).toBeCloseTo(0.35);
   });
 
   it('treats consumption as total including EV', () => {
@@ -60,6 +62,13 @@ describe('deriveSamples', () => {
     expect(r.samples[0]).toEqual({ t, solar: 4, ev: 2.5, house: 1.5 });
   });
 
+  it('subtracts a separately metered water heater', () => {
+    const t = Date.UTC(2025, 0, 1, 3);
+    const stats = { g: [{ start: t, change: 2 }], w: [{ start: t, change: 1.5 }] };
+    const r = deriveSamples(stats, { gridImport: ['g'], gridExport: [], solar: [], batteryOut: [], batteryIn: [], ev: '', wh: 'w' });
+    expect(r.samples[0]).toEqual({ t, solar: 0, ev: 0, wh: 1.5, house: 0.5 });
+  });
+
   it('reports gaps and accepts ISO or seconds timestamps', () => {
     const t0 = Date.UTC(2025, 0, 1, 0);
     const stats = {
@@ -96,6 +105,14 @@ describe('home assistant helpers', () => {
     expect(sel.solar).toEqual(['sensor.pv']);
     expect(sel.batteryOut).toEqual(['sensor.bo']);
     expect(sel.devices[1].name).toBe('Fridge');
+  });
+
+  it('recognises water heater names in several languages', () => {
+    expect(looksLikeWaterHeater('sensor.water_heater_energy')).toBe(true);
+    expect(looksLikeWaterHeater('sensor.termo_acumulador_kwh')).toBe(true);
+    expect(looksLikeWaterHeater('sensor.chauffe_eau_energie')).toBe(true);
+    expect(looksLikeWaterHeater('sensor.aquarea_dhw_consumption')).toBe(true);
+    expect(looksLikeWaterHeater('sensor.wallbox_energy')).toBe(false);
   });
 
   it('recognises common EV charger names', () => {

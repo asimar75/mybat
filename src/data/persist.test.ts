@@ -17,6 +17,7 @@ describe('dataset persistence encoding', () => {
       expect(Math.abs(s.house - samples[i].house)).toBeLessThanOrEqual(0.0005);
       expect(Math.abs(s.solar - samples[i].solar)).toBeLessThanOrEqual(0.0005);
       expect(Math.abs(s.ev - samples[i].ev)).toBeLessThanOrEqual(0.0005);
+      expect(Math.abs((s.wh ?? -1) - (samples[i].wh ?? 0))).toBeLessThanOrEqual(0.0005);
     });
   });
 

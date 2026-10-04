@@ -64,6 +64,27 @@ export function batteryPowerKw(spec: BatterySpec): number {
   return Math.min(spec.inverterKw, usableKwh(spec) * spec.cRate);
 }
 
+/** Per-hour record of what the battery did, filled when passed to `simulate`. All kWh. */
+export interface SimTrace {
+  /** Usable energy stored at the end of the hour. */
+  soc: Float32Array;
+  /** Energy taken from solar into the battery (before losses). */
+  chargeSolar: Float32Array;
+  /** Energy taken from the grid into the battery (before losses). */
+  chargeGrid: Float32Array;
+  /** Energy delivered by the battery to household load. */
+  toHouse: Float32Array;
+  /** Energy delivered by the battery to the EV charger (only in `include` mode). */
+  toEv: Float32Array;
+  gridImport: Float32Array;
+  gridExport: Float32Array;
+}
+
+export function createTrace(hours: number): SimTrace {
+  const f = () => new Float32Array(hours);
+  return { soc: f(), chargeSolar: f(), chargeGrid: f(), toHouse: f(), toEv: f(), gridImport: f(), gridExport: f() };
+}
+
 /**
  * Hour-by-hour battery simulation.
  *
@@ -79,6 +100,7 @@ export function simulate(
   spec: BatterySpec,
   tariff: Tariff,
   options: SimOptions,
+  trace?: SimTrace,
 ): SimResult {
   const { samples, hourOfDay, dayIndex, monthIndex, monthKeys } = data;
   const capacity = usableKwh(spec);
@@ -119,7 +141,8 @@ export function simulate(
       dayWasEmpty = false;
     }
 
-    const house = Math.max(0, s.house);
+    // The water heater is household load for dispatch; it's metered separately only so it can be shifted.
+    const house = Math.max(0, s.house) + Math.max(0, s.wh ?? 0);
     const ev = Math.max(0, s.ev);
     const solar = Math.max(0, s.solar);
     totalLoad += house + ev;
@@ -158,8 +181,9 @@ export function simulate(
     let imported = houseDeficit + evDeficit - delivered;
 
     // 4. Optional off-peak grid charging.
+    let gridCharge = 0;
     if (offPeakHold && soc < gridTarget && powerLeft > 0) {
-      const gridCharge = Math.min(powerLeft, (gridTarget - soc) / leg);
+      gridCharge = Math.min(powerLeft, (gridTarget - soc) / leg);
       soc += gridCharge * leg;
       chargedFromGrid += gridCharge;
       imported += gridCharge;
@@ -168,6 +192,17 @@ export function simulate(
     if (soc < 0) soc = 0;
     if (soc > capacity) soc = capacity;
     if (capacity > 0 && soc >= fullThreshold) dayWasFull = true;
+    if (trace) {
+      // Battery output covers the house shortfall first, so anything beyond it went to the EV.
+      const toEv = Math.max(0, delivered - houseDeficit);
+      trace.soc[i] = soc;
+      trace.chargeSolar[i] = solarCharge;
+      trace.chargeGrid[i] = gridCharge;
+      trace.toHouse[i] = delivered - toEv;
+      trace.toEv[i] = toEv;
+      trace.gridImport[i] = imported;
+      trace.gridExport[i] = exported;
+    }
 
     const price = importPrice(hour, tariff);
     importKwh += imported;

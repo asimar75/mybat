@@ -17,7 +17,7 @@ function input(): ExportInput {
   const rec = sweep(prepare(samples), template, sizeRange(10, 5), tariff, options, economics);
   return {
     rec, samples, dataLabel: 'demo year', tariff, economics, template, options,
-    scenario: { householdPct: 10, evPct: 0 }, currency: '€', failedChecks: [], generatedAt: new Date(2026, 0, 1),
+    scenario: { householdPct: 10, evPct: 0 }, waterHeater: { shift: false, maxKw: 1 }, currency: '€', failedChecks: [], generatedAt: new Date(2026, 0, 1),
   };
 }
 
@@ -31,6 +31,7 @@ describe('Excel export', () => {
     const flat = JSON.stringify(sheets[0].data);
     expect(flat).toContain('household use +10 %');
     expect(flat).toContain('demo year');
+    expect(JSON.stringify(sheets[3].data[0])).toContain('Water heater kWh'); // demo has a metered water heater
   });
 
   it('writes a valid .xlsx whose first hour shows local midnight', async () => {

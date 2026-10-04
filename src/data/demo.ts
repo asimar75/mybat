@@ -14,7 +14,8 @@ function mulberry32(seed: number) {
 
 /**
  * One synthetic year for a mid-latitude (~45°N) home: 6 kWp solar, ~5,100 kWh/year household
- * use, and an EV charged three evenings a week at 7.4 kW (~3,000 kWh/year).
+ * use, a separately metered heat-pump water heater on a 02:00–05:00 timer (~900 kWh/year), and an
+ * EV charged three evenings a week at 7.4 kW (~3,300 kWh/year).
  */
 export function demoYear(year = new Date().getFullYear() - 1): HourSample[] {
   const rand = mulberry32(42);
@@ -33,6 +34,8 @@ export function demoYear(year = new Date().getFullYear() - 1): HourSample[] {
     const evToday = weekday === 1 || weekday === 3 || weekday === 5;
     const evNeed = evToday ? 16 + rand() * 10 : 0; // kWh per session
     const heating = Math.max(0, -season) * 0.25; // extra winter load, kW
+    // Heat-pump water heater on a night timer, 02:00–05:00; colder inlet water in winter.
+    const waterHeating = 2.2 * (1 + 0.35 * Math.max(0, -season)) * (0.85 + rand() * 0.3);
 
     for (let h = 0; h < 24; h++) {
       const t = start + (day * 24 + h) * HOUR_MS;
@@ -48,7 +51,8 @@ export function demoYear(year = new Date().getFullYear() - 1): HourSample[] {
         const delivered = (h - 18) * 7.4;
         ev = Math.max(0, Math.min(7.4, evNeed - delivered));
       }
-      samples.push({ t, house, solar, ev });
+      const wh = h >= 2 && h < 5 ? waterHeating / 3 : 0;
+      samples.push({ t, house, solar, ev, wh });
     }
   }
   return samples;

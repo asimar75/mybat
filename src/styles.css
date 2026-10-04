@@ -13,6 +13,7 @@
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
+  --series-4: #eda100;
   --good: #006300;
   --good-bg: #e7f3e7;
   --bad: #b02e2e;
@@ -36,6 +37,7 @@
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
+    --series-4: #c98500;
     --good: #0ca30c;
     --good-bg: #13261a;
     --bad: #e66767;
@@ -56,6 +58,7 @@
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
+  --series-4: #c98500;
   --good: #0ca30c;
   --good-bg: #13261a;
   --bad: #e66767;
@@ -507,4 +510,20 @@ tr.short td:last-child {
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.sim-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-end;
+}
+.sim-controls label {
+  min-width: 150px;
+}
+.chart-box.short {
+  height: 170px;
+}
+.chart-box.tall {
+  height: 300px;
 }

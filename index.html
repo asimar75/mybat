@@ -58,6 +58,7 @@
               <label>Grid export <input id="map-ge" list="ha-stats" /></label>
               <label>Solar production <input id="map-solar" list="ha-stats" /></label>
               <label>EV charger <input id="map-ev" list="ha-stats" placeholder="none" /></label>
+              <label>Water heater (own meter) <input id="map-wh" list="ha-stats" placeholder="none" /></label>
               <label>Existing battery — discharge <input id="map-bo" list="ha-stats" placeholder="none" /></label>
               <label>Existing battery — charge <input id="map-bi" list="ha-stats" placeholder="none" /></label>
             </div>
@@ -72,8 +73,8 @@
         <div class="tab-panel" data-panel="csv" hidden>
           <p class="hint">
             Columns: <code>timestamp</code>, <code>consumption_kwh</code> (total use <em>including</em> the car) or
-            <code>grid_import_kwh</code> + <code>grid_export_kwh</code>, plus optional <code>solar_kwh</code> and
-            <code>ev_kwh</code>. Any row interval works; rows are summed into hours.
+            <code>grid_import_kwh</code> + <code>grid_export_kwh</code>, plus optional <code>solar_kwh</code>,
+            <code>ev_kwh</code> and <code>water_heater_kwh</code>. Any row interval works; rows are summed into hours.
             <a href="#" id="csv-template">Download a template</a>.
           </p>
           <input id="csv-file" type="file" accept=".csv,.tsv,.txt,text/csv" />
@@ -81,7 +82,7 @@
 
         <div class="tab-panel" data-panel="demo" hidden>
           <p class="hint">
-            A synthetic year: 6 kWp solar at ~45°N, ~5,100 kWh household use, and an EV charged three evenings a week.
+            A synthetic year: 6 kWp solar at ~45°N, ~5,100 kWh household use, a heat-pump water heater on a night timer (~900 kWh, metered separately), and an EV charged three evenings a week.
             Use it to learn the tool before connecting your own data.
           </p>
           <div class="actions"><button id="demo-load" class="primary">Load demo year</button></div>
@@ -175,6 +176,8 @@
             </label>
             <label class="check" data-tou><input name="gridCharge" type="checkbox" /> Charge battery from grid off-peak</label>
             <label data-tou data-gridcharge>Grid-charge up to % <input name="gridChargePct" type="number" min="10" max="100" value="100" /></label>
+            <label class="check" data-wh><input name="whShift" type="checkbox" /> Run water heater on solar surplus</label>
+            <label data-wh data-whshift>Water heater max power (kW) <input name="whMaxKw" type="number" step="0.1" min="0.1" max="6" value="1" /></label>
             <label>Largest size to test (kWh) <input name="maxKwh" type="number" min="2" max="100" value="25" /></label>
             <label>Size step (kWh) <input name="stepKwh" type="number" step="0.5" min="0.5" value="1" /></label>
           </fieldset>

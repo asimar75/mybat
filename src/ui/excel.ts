@@ -3,7 +3,7 @@ import type { Scenario } from '../engine/scenario';
 import { describeScenario, isNoChange } from '../engine/scenario';
 import type { Recommendation } from '../engine/sweep';
 import type { BatterySpec, Economics, HourSample, SimOptions, Tariff } from '../engine/types';
-import { monthlyTotals } from '../data/validate';
+import { hasWaterHeater, monthlyTotals } from '../data/validate';
 
 /** Everything the export needs; built by main.ts from the current page state. */
 export interface ExportInput {
@@ -16,6 +16,7 @@ export interface ExportInput {
   template: Omit<BatterySpec, 'nominalKwh'>;
   options: SimOptions;
   scenario: Scenario;
+  waterHeater: { shift: boolean; maxKw: number };
   currency: string;
   failedChecks: string[];
   generatedAt: Date;
@@ -42,6 +43,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   const base = rec.baseline.annual;
   const first = input.samples[0]?.t ?? 0;
   const last = input.samples[input.samples.length - 1]?.t ?? 0;
+  const withWh = hasWaterHeater(input.samples);
 
   // ---- Summary ----
   const summary: Cell[][] = [
@@ -100,6 +102,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
     [bold('Strategy')],
     [text('EV charger'), text(options.evMode === 'include' ? 'Battery may charge the car' : 'Battery never charges the car')],
     [text('Off-peak grid charging'), text(options.gridCharge && tariff.useTimeOfUse ? `Yes, up to ${Math.round(options.gridChargeTarget * 100)} %` : 'No')],
+    [text('Water heater on solar surplus'), text(!withWh ? 'No separate water heater meter' : input.waterHeater.shift ? `Yes, up to ${input.waterHeater.maxKw} kW` : 'No (measured timing)')],
   );
 
   // ---- All sizes ----
@@ -126,13 +129,14 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   const months = monthlyTotals(input.samples);
   const monthly: Cell[][] = [
     header([
-      'Month', 'House kWh', 'EV kWh', 'Solar kWh', 'Grid import, no battery',
+      'Month', 'House kWh', 'EV kWh', ...(withWh ? ['Water heater kWh'] : []), 'Solar kWh', 'Grid import, no battery',
       ...(focus ? [`Grid import, ${focus.nominalKwh} kWh battery`] : []), 'Hours with data',
     ]),
     ...months.map((m) => [
       text(m.month),
       num(m.house),
       num(m.ev),
+      ...(withWh ? [num(m.wh)] : []),
       num(m.solar),
       num(base.monthlyImport.get(m.month) ?? 0),
       ...(focus ? [num(focus.annual.monthlyImport.get(m.month) ?? 0)] : []),
@@ -142,11 +146,12 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   // ---- Hourly ----
   const hourly: Cell[][] = [
-    header(['Time', 'House kWh', 'EV kWh', 'Solar kWh']),
+    header(['Time', 'House kWh', 'EV kWh', ...(withWh ? ['Water heater kWh'] : []), 'Solar kWh']),
     ...input.samples.map((s) => [
       { value: localDate(s.t), type: Date, format: 'yyyy-mm-dd hh:mm' } as Cell,
       num(s.house, '0.000'),
       num(s.ev, '0.000'),
+      ...(withWh ? [num(s.wh ?? 0, '0.000')] : []),
       num(s.solar, '0.000'),
     ]),
   ];
@@ -154,8 +159,8 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   return [
     { sheet: 'Summary', data: summary, columns: [{ width: 42 }, { width: 48 }] },
     { sheet: 'All sizes', data: sizes, columns: new Array(13).fill({ width: 15 }), stickyRowsCount: 1 },
-    { sheet: 'Monthly', data: monthly, columns: [{ width: 10 }, ...new Array(6).fill({ width: 20 })], stickyRowsCount: 1 },
-    { sheet: 'Hourly data', data: hourly, columns: [{ width: 18 }, { width: 12 }, { width: 12 }, { width: 12 }], stickyRowsCount: 1 },
+    { sheet: 'Monthly', data: monthly, columns: [{ width: 10 }, ...new Array(7).fill({ width: 20 })], stickyRowsCount: 1 },
+    { sheet: 'Hourly data', data: hourly, columns: [{ width: 18 }, ...new Array(4).fill({ width: 16 })], stickyRowsCount: 1 },
   ] as Sheet<Blob>[];
 }
 

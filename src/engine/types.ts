@@ -2,12 +2,14 @@
 export interface HourSample {
   /** Start of the hour, epoch milliseconds. */
   t: number;
-  /** Household consumption excluding the EV charger. */
+  /** Household consumption excluding the EV charger and the water heater. */
   house: number;
   /** Solar production. */
   solar: number;
   /** EV charger consumption. */
   ev: number;
+  /** Water heater consumption, when it has its own meter (otherwise it's inside `house`). */
+  wh?: number;
 }
 
 /**

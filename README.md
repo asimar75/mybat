@@ -114,10 +114,18 @@ Open `http://<pi-address>:8050` from any device on your network (find the addres
 
 To update later: `cd ~/mybat && git pull && npm ci && npm run build && sudo systemctl restart mybat`.
 
+### Water heater
+
+If your water heater has its own energy meter, pick it under **Water heater (own meter)**; the app
+tries to find it automatically. Its use is then shown separately, and **Run water heater on solar
+surplus** (Strategy) moves each day's water heating into sunny hours, up to the heater's power,
+before the battery gets the surplus. The result always compares both timings, so you can see how
+much a timer or solar diverter saves on its own and how it changes the best battery size.
+
 ### No Home Assistant?
 
 Use the **CSV file** tab. Columns: `timestamp`, `consumption_kwh` (total incl. EV) **or**
-`grid_import_kwh` + `grid_export_kwh`, plus optional `solar_kwh` and `ev_kwh`. A template is
+`grid_import_kwh` + `grid_export_kwh`, plus optional `solar_kwh`, `ev_kwh` and `water_heater_kwh`. A template is
 downloadable in the app.
 
 ## Results, what-ifs and saving
@@ -126,6 +134,10 @@ downloadable in the app.
   is scaled equally, so your daily and seasonal pattern stays as measured: good for "use 10 %
   less" or "a second car with the same habits", not for a heat pump (which adds mostly winter
   load). A banner on the result shows the scenario next to your measured numbers.
+- **Hour by hour with a battery:** under the result, pick any tested size, a start date, 1–14 days
+  and whether the battery may charge the car. One chart shows the energy stored; the other shows
+  each hour's charging (from solar or grid, above zero) and discharging (to the house or the EV,
+  below zero), with solar and home use for context. It opens on a recent sunny spell.
 - **Download results (Excel):** one `.xlsx` with a *Summary* (recommendation, data, scenario and
   every assumption), *All sizes*, *Monthly* totals and the *Hourly data* used.
 - **Data survives a refresh:** the last loaded dataset is kept in this browser until you load
@@ -170,3 +182,8 @@ npm run build    # type-check + production build into dist/
 - Wrap as an iOS/Android app with [Capacitor](https://capacitorjs.com) (same code).
 - Model dynamic (hourly spot) tariffs.
 - Add backup-power sizing (keep a reserve for outages).
+
+## License
+
+MIT, see [LICENSE](LICENSE). `.gitignore` blocks CSV/Excel exports and `.env` files so personal
+energy data and secrets aren't committed by accident.
