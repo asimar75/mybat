@@ -1,6 +1,7 @@
 import type { Sheet } from 'write-excel-file/browser';
 import type { Scenario } from '../engine/scenario';
 import { describeScenario, isNoChange } from '../engine/scenario';
+import type { ReimbursementResult } from '../engine/reimbursement';
 import type { Recommendation } from '../engine/sweep';
 import type { BatterySpec, Economics, HourSample, SimOptions, Tariff } from '../engine/types';
 import { hasWaterHeater, monthlyTotals } from '../data/validate';
@@ -17,6 +18,8 @@ export interface ExportInput {
   options: SimOptions;
   scenario: Scenario;
   waterHeater: { shift: boolean; maxKw: number };
+  /** Employer EV reimbursement over the data period, or null when not used. */
+  reimbursement: ReimbursementResult | null;
   currency: string;
   failedChecks: string[];
   generatedAt: Date;
@@ -73,6 +76,14 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
     [text('Yearly solar (kWh)'), num(base.solarKwh, '#,##0')],
     [text('Yearly bill without battery'), num(base.netCost, money)],
     [text('What-if scenario'), text(isNoChange(scenario) ? 'none (measured data)' : describeScenario(scenario))],
+    ...(input.reimbursement
+      ? [
+          [text('EV reimbursement per year'), num(input.reimbursement.total * rec.annualFactor, money)],
+          [text('Net cost after reimbursement, no battery'), num(base.netCost - input.reimbursement.total * rec.annualFactor, money)],
+          ...(focus ? [[text(`Net cost after reimbursement, ${focus.nominalKwh} kWh battery`), num(focus.annual.netCost - input.reimbursement.total * rec.annualFactor, money)]] : []),
+          [text('Note'), text('Reimbursement is paid on every EV kWh whatever its source, so it does not change battery savings or payback.')],
+        ]
+      : []),
     [text('Data checks'), text(input.failedChecks.length ? `Warnings: ${input.failedChecks.join('; ')}` : 'All passed')],
     [],
     [bold('Tariff')],
@@ -130,7 +141,9 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   const monthly: Cell[][] = [
     header([
       'Month', 'House kWh', 'EV kWh', ...(withWh ? ['Water heater kWh'] : []), 'Solar kWh', 'Grid import, no battery',
-      ...(focus ? [`Grid import, ${focus.nominalKwh} kWh battery`] : []), 'Hours with data',
+      ...(focus ? [`Grid import, ${focus.nominalKwh} kWh battery`] : []),
+      ...(input.reimbursement ? ['EV reimbursement price', 'EV reimbursement'] : []),
+      'Hours with data',
     ]),
     ...months.map((m) => [
       text(m.month),
@@ -140,6 +153,12 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
       num(m.solar),
       num(base.monthlyImport.get(m.month) ?? 0),
       ...(focus ? [num(focus.annual.monthlyImport.get(m.month) ?? 0)] : []),
+      ...(input.reimbursement
+        ? (() => {
+            const r = input.reimbursement.byMonth.find((x) => x.month === m.month);
+            return [num(r?.price ?? 0, '0.000'), num(r?.amount ?? 0, money)];
+          })()
+        : []),
       num(m.hours, '0'),
     ]),
   ];
@@ -159,7 +178,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   return [
     { sheet: 'Summary', data: summary, columns: [{ width: 42 }, { width: 48 }] },
     { sheet: 'All sizes', data: sizes, columns: new Array(13).fill({ width: 15 }), stickyRowsCount: 1 },
-    { sheet: 'Monthly', data: monthly, columns: [{ width: 10 }, ...new Array(7).fill({ width: 20 })], stickyRowsCount: 1 },
+    { sheet: 'Monthly', data: monthly, columns: [{ width: 10 }, ...new Array(9).fill({ width: 20 })], stickyRowsCount: 1 },
     { sheet: 'Hourly data', data: hourly, columns: [{ width: 18 }, ...new Array(4).fill({ width: 16 })], stickyRowsCount: 1 },
   ] as Sheet<Blob>[];
 }

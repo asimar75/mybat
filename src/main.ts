@@ -1,4 +1,5 @@
 import './styles.css';
+import { reimbursement, type ReimbursementPrices, type ReimbursementResult } from './engine/reimbursement';
 import { applyScenario, describeScenario, isNoChange, shiftWaterHeater, type Scenario } from './engine/scenario';
 import { createTrace, prepare, simulate, usableKwh, type PreparedData } from './engine/simulate';
 import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/sweep';
@@ -54,6 +55,7 @@ let altData: PreparedData | null = null;
 let altKey = '';
 let dataLabel = '';
 let lastCfg: ReturnType<typeof readSettings> | null = null;
+let lastReimb: ReimbursementResult | null = null;
 
 // ---------- tabs ----------
 
@@ -78,6 +80,7 @@ function setData(samples: HourSample[], label: string, notes: string[] = [], res
   simData = null;
   altData = null;
   syncVisibility();
+  renderMonthPrices();
   dataNotes = notes;
   dataLabel = label;
   // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
@@ -292,6 +295,7 @@ function restoreSettings() {
 function saveSettings() {
   const out: Record<string, string | boolean> = {};
   for (const el of Array.from(form.elements)) {
+    if (!(el as HTMLInputElement).name) continue; // monthly reimbursement prices are stored separately
     if (el instanceof HTMLInputElement) out[el.name] = el.type === 'checkbox' ? el.checked : el.value;
     else if (el instanceof HTMLSelectElement) out[el.name] = el.value;
   }
@@ -338,7 +342,8 @@ function readSettings() {
     evPct: Math.max(-100, n('evPct', 0)),
   };
   const waterHeater = { shift: b('whShift'), maxKw: Math.max(0.1, n('whMaxKw', 1)) };
-  return { tariff, options, economics, template, sizes, scenario, waterHeater, currency: s('currency') || '€' };
+  const reimb = { on: b('reimbOn'), prices: { defaultPrice: Math.max(0, n('reimbDefault', 0)), months: loadMonthPrices() } as ReimbursementPrices };
+  return { tariff, options, economics, template, sizes, scenario, waterHeater, reimb, currency: s('currency') || '€' };
 }
 
 function syncVisibility() {
@@ -352,7 +357,46 @@ function syncVisibility() {
   const whShift = (form.elements.namedItem('whShift') as HTMLInputElement).checked;
   form.querySelectorAll<HTMLElement>('[data-wh]').forEach((el) => (el.hidden = !wh));
   form.querySelectorAll<HTMLElement>('[data-whshift]').forEach((el) => (el.hidden = !wh || !whShift));
+  const reimbOn = (form.elements.namedItem('reimbOn') as HTMLInputElement).checked;
+  form.querySelectorAll<HTMLElement>('[data-reimb]').forEach((el) => (el.hidden = !reimbOn));
 }
+
+// ---------- EV reimbursement prices per month ----------
+
+const REIMB_KEY = 'mybat.reimbMonths';
+
+function loadMonthPrices(): Record<string, number> {
+  try {
+    const raw = storage.get(REIMB_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)));
+  } catch {
+    return {};
+  }
+}
+
+/** One input per month in the loaded data; empty means "use the default price". */
+function renderMonthPrices() {
+  if (!data) return;
+  const saved = loadMonthPrices();
+  $('#reimb-months').innerHTML = data.monthKeys
+    .map((m) => {
+      const label = new Date(`${m}-01T12:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+      const value = saved[m] !== undefined ? String(saved[m]) : '';
+      return `<label>${label}<input type="number" step="0.001" min="0" data-month="${m}" value="${value}" placeholder="default" /></label>`;
+    })
+    .join('');
+}
+
+$('#reimb-months').addEventListener('input', () => {
+  const months = loadMonthPrices();
+  document.querySelectorAll<HTMLInputElement>('#reimb-months input[data-month]').forEach((el) => {
+    const v = el.value.trim() === '' ? NaN : Number(el.value);
+    if (Number.isFinite(v) && v >= 0) months[el.dataset.month!] = v;
+    else delete months[el.dataset.month!];
+  });
+  storage.set(REIMB_KEY, JSON.stringify(months));
+});
 
 restoreSettings();
 syncVisibility();
@@ -422,7 +466,26 @@ function recompute() {
   }
   lastRec = rec;
   lastCfg = cfg;
-  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears, scenarioNote(rec, cfg), whItem);
+  lastReimb = cfg.reimb.on ? reimbursement(simData.samples, cfg.reimb.prices) : null;
+  const extra = [whItem, lastReimb ? reimbursementInsight(rec, lastReimb, cfg.currency) : ''].filter(Boolean);
+  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears, scenarioNote(rec, cfg), extra);
+}
+
+/**
+ * Net electricity cost after the employer's EV reimbursement. Deliberately kept out of the battery
+ * maths: it's paid on every EV kWh whatever its source, so it's the same for every battery size.
+ */
+function reimbursementInsight(rec: Recommendation, r: ReimbursementResult, currency: string): string {
+  const f = rec.annualFactor;
+  const paid = r.total * f;
+  const focus = rec.best ?? rec.knee;
+  const net = (cost: number) => (cost - paid >= 0 ? money(cost - paid, currency) : `${money(paid - cost, currency)} earned`);
+  const withBattery = focus ? `, ${net(focus.annual.netCost)} with the ${focus.nominalKwh} kWh battery` : '';
+  return (
+    `<b>Employer EV reimbursement:</b> ${money(paid, currency)} a year for ${kwh(r.evKwh * f)} charged. ` +
+    `Net electricity cost after it: ${net(rec.baseline.annual.netCost)} without a battery${withBattery}. ` +
+    `The battery's saving and payback are unchanged — you're paid for every kWh the car takes, whether it came from the grid, solar or the battery.`
+  );
 }
 
 /** Compares the result with the water heater on solar surplus vs. at its measured times. */
@@ -547,7 +610,7 @@ function scenarioNote(rec: Recommendation, cfg: ReturnType<typeof readSettings>)
     The result below compares batteries under this scenario. Set both changes to 0 to go back to your measured data.</p>`;
 }
 
-function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number, scenarioHtml = '', whItem = '') {
+function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number, scenarioHtml = '', extra: string[] = []) {
   const focus = rec.best ?? rec.knee;
   const dataWarning = failedChecks.length
     ? `<p class="note"><b>Check your data first.</b> Step 2 flagged: ${escapeHtml(failedChecks.join('; '))}.
@@ -557,7 +620,7 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
     ${dataWarning}
     ${scenarioHtml}
     ${verdict(rec, currency, lifetime)}
-    ${insights(rec, focus, currency, evMode, whItem ? [whItem] : [])}
+    ${insights(rec, focus, currency, evMode, extra)}
     <div class="charts">
       <figure>
         <figcaption>Lifetime savings vs. battery cost<small>Savings above the cost line means the battery pays for itself</small></figcaption>
@@ -867,6 +930,7 @@ $('#results-body').addEventListener('click', async (e) => {
         options: lastCfg.options,
         scenario: lastCfg.scenario,
         waterHeater: lastCfg.waterHeater,
+        reimbursement: lastReimb,
         currency: lastCfg.currency,
         failedChecks,
         generatedAt: new Date(),

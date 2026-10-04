@@ -134,6 +134,12 @@ downloadable in the app.
   is scaled equally, so your daily and seasonal pattern stays as measured: good for "use 10 %
   less" or "a second car with the same habits", not for a heat pump (which adds mostly winter
   load). A banner on the result shows the scenario next to your measured numbers.
+- **EV reimbursement:** if your employer pays you per kWh charged at home, tick it under
+  *Assumptions → EV reimbursement*, set a default price and, under *Price per month*, the price
+  for each month (empty months use the default). The result shows the yearly reimbursement and
+  your net electricity cost after it, with and without the battery, and the Excel file adds it per
+  month. It is deliberately **not** added to the battery's saving: it's paid on every EV kWh
+  whether it came from the grid, solar or the battery, so it is the same for every battery size.
 - **Hour by hour with a battery:** under the result, pick any tested size, a start date, 1–14 days
   and whether the battery may charge the car. One chart shows the energy stored; the other shows
   each hour's charging (from solar or grid, above zero) and discharging (to the house or the EV,
