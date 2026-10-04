@@ -1,5 +1,6 @@
 import './styles.css';
-import { prepare, type PreparedData } from './engine/simulate';
+import { applyScenario, describeScenario, isNoChange, type Scenario } from './engine/scenario';
+import { prepare, simulate, type PreparedData } from './engine/simulate';
 import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/sweep';
 import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
 import { CSV_TEMPLATE, parseCsv } from './data/csv';
@@ -7,7 +8,9 @@ import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, parseEnergyPrefs } from './data/homeassistant';
 import { dailyTotals, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
+import { clearDataset, loadDataset, saveDataset } from './data/persist';
 import { renderCharts, renderDataCharts } from './ui/charts';
+import { exportExcel } from './ui/excel';
 import { dateRange, escapeHtml, kwh, money, num1, pct, years } from './ui/format';
 
 // ---------- small helpers ----------
@@ -43,6 +46,11 @@ function setStatus(msg: string, kind: 'info' | 'error' | 'ok' = 'info') {
 let data: PreparedData | null = null;
 let dataNotes: string[] = [];
 let lastRec: Recommendation | null = null;
+/** Data the result is computed from: the measured history, or a what-if version of it. */
+let simData: PreparedData | null = null;
+let simKey = '';
+let dataLabel = '';
+let lastCfg: ReturnType<typeof readSettings> | null = null;
 
 // ---------- tabs ----------
 
@@ -58,14 +66,24 @@ if (savedTab) document.querySelector<HTMLButtonElement>(`[role=tab][data-tab="${
 
 // ---------- data loading ----------
 
-function setData(samples: HourSample[], label: string, notes: string[] = []) {
+function setData(samples: HourSample[], label: string, notes: string[] = [], restoredAt?: number) {
   if (samples.length < 24) {
     setStatus('Not enough data: at least one full day of hourly values is needed.', 'error');
     return;
   }
   data = prepare(samples);
+  simData = null;
   dataNotes = notes;
-  setStatus(`Loaded ${label}.`, 'ok');
+  dataLabel = label;
+  // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
+  if (restoredAt !== undefined) {
+    setStatus(`Restored ${label}, loaded ${new Date(restoredAt).toLocaleString()}. Load new data to replace it.`, 'ok');
+  } else if (saveDataset({ samples, label, notes, savedAt: Date.now() })) {
+    setStatus(`Loaded ${label}. It stays here after a page refresh until you load new data.`, 'ok');
+  } else {
+    setStatus(`Loaded ${label}. Too large to keep in this browser, so a refresh will clear it.`, 'ok');
+  }
+  $('#data-forget').hidden = false;
   renderSummary();
   renderValidation();
   recompute();
@@ -302,7 +320,11 @@ function readSettings() {
     cRate: Math.max(0.05, n('cRate', 0.5)),
   };
   const sizes = sizeRange(Math.min(100, Math.max(1, n('maxKwh', 25))), n('stepKwh', 1));
-  return { tariff, options, economics, template, sizes, currency: s('currency') || '€' };
+  const scenario: Scenario = {
+    householdPct: Math.max(-100, n('householdPct', 0)),
+    evPct: Math.max(-100, n('evPct', 0)),
+  };
+  return { tariff, options, economics, template, sizes, scenario, currency: s('currency') || '€' };
 }
 
 function syncVisibility() {
@@ -354,9 +376,16 @@ function renderSummary() {
 function recompute() {
   if (!data) return;
   const cfg = readSettings();
-  const rec = sweep(data, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
+  // Re-prepare only when the scenario changes; tariff or battery edits reuse it.
+  const key = `${cfg.scenario.householdPct}|${cfg.scenario.evPct}`;
+  if (!simData || key !== simKey) {
+    simData = isNoChange(cfg.scenario) ? data : prepare(applyScenario(data.samples, cfg.scenario));
+    simKey = key;
+  }
+  const rec = sweep(simData, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
   lastRec = rec;
-  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears);
+  lastCfg = cfg;
+  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears, scenarioNote(rec, cfg));
 }
 
 function verdict(rec: Recommendation, currency: string, lifetime: number): string {
@@ -406,7 +435,7 @@ function insights(rec: Recommendation, focus: SweepRow | null, currency: string,
             : 'A balanced use of capacity.'),
     );
   }
-  const evGrid = evFromGrid(data.samples) * rec.annualFactor;
+  const evGrid = evFromGrid((simData ?? data).samples) * rec.annualFactor;
   if (evGrid > 50 && base.importKwh > 0) {
     const share = evGrid / base.importKwh;
     items.push(
@@ -451,7 +480,19 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
     </details>`;
 }
 
-function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number) {
+/** Banner shown while a what-if is active, comparing it with the measured history. */
+function scenarioNote(rec: Recommendation, cfg: ReturnType<typeof readSettings>): string {
+  if (!data || isNoChange(cfg.scenario)) return '';
+  const measured = simulate(data, { ...cfg.template, nominalKwh: 0 }, cfg.tariff, cfg.options);
+  const f = rec.annualFactor;
+  const now = rec.baseline.annual;
+  return `<p class="note"><b>What-if: ${escapeHtml(describeScenario(cfg.scenario))}.</b>
+    Yearly use ${kwh(measured.totalLoadKwh * f)} → ${kwh(now.totalLoadKwh)}; bill without a battery
+    ${money(measured.netCost * f, cfg.currency)} → ${money(now.netCost, cfg.currency)}.
+    The result below compares batteries under this scenario. Set both changes to 0 to go back to your measured data.</p>`;
+}
+
+function renderResults(rec: Recommendation, currency: string, evMode: string, lifetime: number, scenarioHtml = '') {
   const focus = rec.best ?? rec.knee;
   const dataWarning = failedChecks.length
     ? `<p class="note"><b>Check your data first.</b> Step 2 flagged: ${escapeHtml(failedChecks.join('; '))}.
@@ -459,6 +500,7 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
     : '';
   $('#results-body').innerHTML = `
     ${dataWarning}
+    ${scenarioHtml}
     ${verdict(rec, currency, lifetime)}
     ${insights(rec, focus, currency, evMode)}
     <div class="charts">
@@ -475,7 +517,11 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
         <div class="chart-box"><canvas id="chart-monthly" role="img" aria-label="Monthly grid import with and without battery"></canvas></div>
       </figure>
     </div>
-    ${table(rec, currency, focus)}`;
+    ${table(rec, currency, focus)}
+    <div class="actions inline">
+      <button id="xlsx-export" class="primary" type="button">Download results (Excel)</button>
+      <span class="hint" style="margin:0">Summary, all sizes, monthly totals and the hourly data, in one .xlsx file.</span>
+    </div>`;
   renderCharts(rec, focus, currency);
 }
 
@@ -625,3 +671,45 @@ $('#checks').addEventListener('click', (e) => {
 $('#csv-export').addEventListener('click', () => {
   if (data) downloadText(toCsv(data.samples), 'battery-sizer-hourly.csv');
 });
+
+// ---------- Excel export ----------
+
+$('#results-body').addEventListener('click', async (e) => {
+  const button = (e.target as HTMLElement).closest<HTMLButtonElement>('#xlsx-export');
+  if (!button || !lastRec || !lastCfg || !simData) return;
+  button.disabled = true;
+  try {
+    const stamp = new Date().toISOString().slice(0, 10);
+    await exportExcel(
+      {
+        rec: lastRec,
+        samples: simData.samples,
+        dataLabel,
+        tariff: lastCfg.tariff,
+        economics: lastCfg.economics,
+        template: lastCfg.template,
+        options: lastCfg.options,
+        scenario: lastCfg.scenario,
+        currency: lastCfg.currency,
+        failedChecks,
+        generatedAt: new Date(),
+      },
+      `battery-sizer-${stamp}.xlsx`,
+    );
+  } catch (err) {
+    setStatus(`Excel export failed: ${(err as Error).message}`, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// ---------- restore the last loaded data ----------
+
+$('#data-forget').addEventListener('click', () => {
+  clearDataset();
+  $('#data-forget').hidden = true;
+  setStatus('Saved data removed from this browser. It stays on screen until you refresh.', 'info');
+});
+
+const saved = loadDataset();
+if (saved) setData(saved.samples, saved.label, saved.notes, saved.savedAt);

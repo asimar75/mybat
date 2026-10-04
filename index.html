@@ -87,7 +87,10 @@
           <div class="actions"><button id="demo-load" class="primary">Load demo year</button></div>
         </div>
 
-        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <div class="actions inline" style="margin-top:14px">
+          <p id="status" class="status" role="status" aria-live="polite" style="margin:0"></p>
+          <button id="data-forget" class="link-btn" type="button" hidden>Forget saved data</button>
+        </div>
         <div id="summary"></div>
       </section>
 
@@ -155,6 +158,12 @@
             <label>Max power per usable kWh (C-rate) <input name="cRate" type="number" step="0.1" min="0.1" value="0.5" /></label>
             <label>Lifetime (years) <input name="lifetimeYears" type="number" min="1" max="30" value="12" /></label>
             <label>Capacity loss per year % <input name="degradationPct" type="number" step="0.5" min="0" max="10" value="2" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>What if</legend>
+            <p class="hint" style="margin:0">Scales every hour of your history equally, keeping your daily and seasonal pattern. EV +100 % ≈ a second car with the same habits.</p>
+            <label>Change household use by (%) <input name="householdPct" type="number" step="5" min="-100" max="300" value="0" /></label>
+            <label>Change EV charging by (%) <input name="evPct" type="number" step="5" min="-100" max="300" value="0" /></label>
           </fieldset>
           <fieldset>
             <legend>Strategy</legend>
