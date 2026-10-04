@@ -130,6 +130,10 @@ downloadable in the app.
 
 ## Results, what-ifs and saving
 
+- **Assumptions panel:** all inputs live in a panel on the left (a drawer at the bottom on phones)
+  that stays in place while you scroll the charts. Its header shows the live result (best size,
+  payback, saving, net benefit), so every change is visible immediately.
+
 - **What if:** in *Assumptions*, change household use or EV charging by a percentage. Every hour
   is scaled equally, so your daily and seasonal pattern stays as measured: good for "use 10 %
   less" or "a second car with the same habits", not for a heat pump (which adds mostly winter

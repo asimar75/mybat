@@ -670,7 +670,35 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
     </div>`;
   renderCharts(rec, focus, currency);
   renderBatterySim(rec);
+  renderLive(rec, currency, lifetime);
 }
+
+// ---------- assumptions panel: live result + mobile drawer ----------
+
+/** Compact result in the panel header, so the effect of each change is visible without scrolling. */
+function renderLive(rec: Recommendation, currency: string, lifetime: number) {
+  const flags: string[] = [];
+  if (lastCfg && !isNoChange(lastCfg.scenario)) flags.push(`what-if: ${describeScenario(lastCfg.scenario)}`);
+  if (failedChecks.length) flags.push(`${failedChecks.length} data warning${failedChecks.length === 1 ? '' : 's'}`);
+  const tail = flags.length ? `<br><span class="live-sub">⚠ ${escapeHtml(flags.join(' · '))}</span>` : '';
+  const best = rec.best;
+  if (best) {
+    $('#live').innerHTML =
+      `<span class="live-main live-good">Best value: ${best.nominalKwh} kWh</span><br>` +
+      `<span class="live-sub">Payback ${years(best.paybackYears)} · saves ${money(best.annualSavings, currency)}/yr · ` +
+      `${money(best.netBenefit, currency)} net over ${lifetime} yrs</span>${tail}`;
+    return;
+  }
+  const fastest = rec.rows.filter((r) => r.nominalKwh > 0).sort((x, y) => x.paybackYears - y.paybackYears)[0];
+  $('#live').innerHTML =
+    `<span class="live-main live-bad">No size pays back in ${lifetime} yrs</span><br>` +
+    `<span class="live-sub">Fastest: ${fastest ? `${fastest.nominalKwh} kWh at ${years(fastest.paybackYears)}` : '—'}</span>${tail}`;
+}
+
+$('#panel-toggle').addEventListener('click', () => {
+  const open = $('#panel').classList.toggle('open');
+  $('#panel-toggle').setAttribute('aria-expanded', String(open));
+});
 
 // ---------- hour-by-hour battery view ----------
 

@@ -542,3 +542,117 @@ tr.short td:last-child {
   font-size: 0.9rem;
   color: var(--text-secondary);
 }
+
+/* ---------- layout: assumptions side panel + scrolling content ---------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  align-items: start;
+}
+.content {
+  min-width: 0;
+}
+.content .top,
+.content main,
+.content footer {
+  max-width: 1120px;
+}
+.panel {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px 12px;
+}
+.panel-toggle {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.panel-chevron {
+  display: none;
+}
+.panel-body {
+  padding: 12px 16px 32px;
+}
+.panel .settings {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+.live {
+  margin-top: 8px;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.live .live-main {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.live .live-good {
+  color: var(--good);
+}
+.live .live-bad {
+  color: var(--bad);
+}
+.live .live-sub {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 999px) {
+  .layout {
+    display: block;
+  }
+  body {
+    padding-bottom: 110px;
+  }
+  .panel {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    height: auto;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  }
+  .panel-toggle {
+    cursor: pointer;
+  }
+  .panel-chevron {
+    display: inline;
+    transition: transform 0.15s;
+  }
+  .panel.open .panel-chevron {
+    transform: rotate(180deg);
+  }
+  .panel-body {
+    display: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .panel.open .panel-body {
+    display: block;
+  }
+}
