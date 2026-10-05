@@ -63,7 +63,28 @@ export interface ParsedMeter {
   interpolated: number;
   /** Backward steps in a cumulative counter, ignored. */
   glitches: number;
+  /**
+   * Stretches where every step adds exactly the same energy for hours: the meter was offline and the
+   * export spread the catch-up evenly over the gap (HomeWizard does this). Totals are right, the shape isn't.
+   */
+  evenFills: { from: number; to: number }[];
   skippedRows: number;
+}
+
+/**
+ * Steps (as [time, kWh]) that repeat the same value, to the meter's last digit, for at least `minSteps`
+ * in a row, at no less than `minKwh` per step (standby loads can be just as steady, so they're skipped).
+ */
+export function findEvenFills(steps: [number, number][], minSteps: number, minKwh: number): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  let start = 0;
+  for (let i = 1; i <= steps.length; i++) {
+    const same = i < steps.length && steps[start][1] >= minKwh && Math.abs(steps[i][1] - steps[start][1]) <= 0.0011;
+    if (same) continue;
+    if (i - start >= minSteps) out.push({ from: steps[start][0], to: steps[i - 1][0] });
+    start = i;
+  }
+  return out;
 }
 
 const ENERGY_HINT = /kwh|\bwh\b|mwh|energ|import|export|consum|produc|yield|deliver|levering|feed|inject/i;
@@ -237,6 +258,7 @@ export function parseMeterCsv(name: string, text: string): ParsedMeter {
   const hourly = new Map<number, HourEnergy>();
   let glitches = 0;
   let interpolated = 0;
+  let evenFills: { from: number; to: number }[] = [];
   const bucket = (t: number) => {
     const h = Math.floor(t / HOUR_MS) * HOUR_MS;
     let e = hourly.get(h);
@@ -253,6 +275,8 @@ export function parseMeterCsv(name: string, text: string): ParsedMeter {
     const f1 = hasRegisters ? fillInnerGaps(imp1).filled : [];
     const f2 = hasRegisters ? fillInnerGaps(imp2).filled : [];
     interpolated = Math.max(fi.interpolated, fe.interpolated);
+    const stepsIn: [number, number][] = [];
+    const stepsOut: [number, number][] = [];
     for (let i = 0; i + 1 < times.length; i++) {
       const a = fi.filled[i];
       const b = fi.filled[i + 1];
@@ -264,6 +288,8 @@ export function parseMeterCsv(name: string, text: string): ParsedMeter {
       if (di < -1e-9 || de < -1e-9) glitches++;
       di = Math.max(0, di);
       de = Math.max(0, de);
+      stepsIn.push([times[i], di]);
+      stepsOut.push([times[i], de]);
       // A step spanning a missing stretch (e.g. a long logger outage) is spread over its hours.
       const span = times[i + 1] - times[i];
       const pieces = Math.max(1, Math.round(span / (intervalMinutes * 60000)));
@@ -278,6 +304,12 @@ export function parseMeterCsv(name: string, text: string): ParsedMeter {
           e.r2 = (e.r2 ?? 0) + d2 / pieces;
         }
       }
+    }
+    // Real loads and solar never repeat to the watt for six hours; an evenly spread outage does.
+    if (intervalMinutes <= 30) {
+      const minSteps = Math.round(360 / intervalMinutes);
+      const minKwh = (0.2 * intervalMinutes) / 60; // 200 W on average
+      evenFills = [...findEvenFills(stepsIn, minSteps, minKwh), ...findEvenFills(stepsOut, minSteps, minKwh)].sort((a, b) => a.from - b.from);
     }
   } else {
     for (let i = 0; i < times.length; i++) {
@@ -316,8 +348,19 @@ export function parseMeterCsv(name: string, text: string): ParsedMeter {
     lastHour: hours[hours.length - 1],
     interpolated,
     glitches,
+    evenFills,
     skippedRows,
   };
+}
+
+/** "30/Oct/2025 19:00 – 31/Oct/2025 12:45" for an outage. */
+function fmtSpan(from: number, to: number): string {
+  const time = (t: number) => {
+    const d = new Date(t);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const sameDay = fmtDate(from) === fmtDate(to - 1);
+  return sameDay ? `${fmtDate(from)} ${time(from)}–${time(to)}` : `${fmtDate(from)} ${time(from)} – ${fmtDate(to)} ${time(to)}`;
 }
 
 /** Guesses a meter's role from its energy flows first, then its file name. */
@@ -373,9 +416,20 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     const e = Math.min(...used.map((m) => m.lastHour));
     if (e <= s) throw new Error('The files do not overlap in time.');
     if (s > start || e < end) {
-      const short = used.filter((m) => m.lastHour < end || m.firstHour > start).map((m) => m.name);
+      const short = used
+        .filter((m) => m.lastHour < end || m.firstHour > start)
+        .map((m) => {
+          const range = [m.firstHour > start ? `starts ${fmtDate(m.firstHour)}` : '', m.lastHour < end ? `has no readings after ${fmtDate(m.lastHour)}` : '']
+            .filter(Boolean)
+            .join(' and ');
+          return `${m.name} ${range}`;
+        });
+      const onlySplit = used.filter((m) => m.lastHour < end || m.firstHour > start).every((m) => ev.includes(m) || wh.includes(m));
       notes.push(
-        `Using ${fmtDate(s)} – ${fmtDate(e)}, the period every file covers (${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} shorter).`,
+        `Using ${fmtDate(s)} – ${fmtDate(e)}, the period every file covers: ${short.join('; ')}. ` +
+          (onlySplit
+            ? `To use the full ${fmtDate(start)} – ${fmtDate(end)}, untick “Only use the period every file covers”; the missing EV or water-heater hours then count as household use (total use stays right).`
+            : 'Download every meter for the same period to use more of the data.'),
       );
     }
     start = s;
@@ -445,6 +499,14 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     notes.push(`${m.name}: ${parts.join(', ')}.`);
     if (m.glitches) notes.push(`${m.name}: ${m.glitches} backward counter step${m.glitches === 1 ? '' : 's'} ignored.`);
     if (m.interpolated) notes.push(`${m.name}: ${m.interpolated} missing readings filled in by interpolation.`);
+    if (m.evenFills.length) {
+      const shown = m.evenFills.slice(0, 4).map((g) => fmtSpan(g.from, g.to + m.intervalMinutes * 60000));
+      const more = m.evenFills.length > 4 ? ` and ${m.evenFills.length - 4} more` : '';
+      notes.push(
+        `${m.name}: the meter was probably offline ${shown.join(', ')}${more}. The export spreads the energy evenly over such a gap, ` +
+          'so totals are right but the hour-by-hour shape there is flat (e.g. solar at night). Too short to change the battery size.',
+      );
+    }
   }
   if (grid.length) {
     const measuredIn = samples.reduce((a, s) => a + (s.gridIn ?? 0), 0);

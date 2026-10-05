@@ -652,7 +652,9 @@ function waterHeaterInsight(shifted: Recommendation, measuredTiming: Recommendat
     ? 'At these prices no battery pays back with either timing.'
     : shiftOn
       ? `Best battery: ${best(measuredTiming)} with the measured timing, ${best(shifted)} with it shifted (shown here).`
-      : `The best battery would be ${best(shifted)} instead of ${best(measuredTiming)}.`;
+      : shifted.best && measuredTiming.best && shifted.best.nominalKwh === measuredTiming.best.nominalKwh
+        ? `The best battery stays ${shifted.best.nominalKwh} kWh; its net benefit becomes ${money(shifted.best.netBenefit, currency)} instead of ${money(measuredTiming.best.netBenefit, currency)}${shifted.best.netBenefit < measuredTiming.best.netBenefit ? ', since the heater then uses solar the battery would have stored' : ''}.`
+        : `The best battery would be ${best(shifted)} instead of ${best(measuredTiming)}.`;
   return shiftOn
     ? `<b>Water heater on solar surplus</b> saves ${money(save, currency)} a year before any battery, compared with its measured timing. ${batteryPart}`
     : `<b>Try “Run water heater on solar surplus”</b> in Strategy: it would save ${money(save, currency)} a year with no battery at all. ${batteryPart} A timer or solar diverter on the heater does this.`;

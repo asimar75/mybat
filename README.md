@@ -133,7 +133,8 @@ solar, the EV charger, a water heater… In the **CSV files** tab, select all of
 - proposes what each file is from its energy flows and name (a file that both imports and exports
   is the grid meter, whatever it's called), shown in a table where you confirm or change it;
   your choices are remembered by file name
-- by default uses only the period every file covers (untick to keep the longest period)
+- by default uses only the period every file covers, and says which file is shorter (untick to keep the
+  longest period; missing EV or water-heater hours then count as household use)
 
 If the grid meter has **T1/T2 registers**, each hour is priced as peak or off-peak from the register
 it was counted on (Assumptions → Tariff → time-of-use). That follows schedule changes during the
