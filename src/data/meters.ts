@@ -419,6 +419,10 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     evKwh = Math.min(evKwh, total);
     whKwh = Math.min(whKwh, total - evKwh);
     const sample: HourSample = { t, solar: pv, ev: evKwh, house: total - evKwh - whKwh };
+    if (grid.length) {
+      sample.gridIn = gridIn;
+      sample.gridOut = gridOut;
+    }
     if (wh.length) sample.wh = whKwh;
     samples.push(sample);
   }
@@ -441,6 +445,26 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     notes.push(`${m.name}: ${parts.join(', ')}.`);
     if (m.glitches) notes.push(`${m.name}: ${m.glitches} backward counter step${m.glitches === 1 ? '' : 's'} ignored.`);
     if (m.interpolated) notes.push(`${m.name}: ${m.interpolated} missing readings filled in by interpolation.`);
+  }
+  if (grid.length) {
+    const measuredIn = samples.reduce((a, s) => a + (s.gridIn ?? 0), 0);
+    const measuredOut = samples.reduce((a, s) => a + (s.gridOut ?? 0), 0);
+    const nettedIn = samples.reduce((a, s) => a + Math.max(0, s.house + s.ev + (s.wh ?? 0) - s.solar), 0);
+    const lost = measuredIn - nettedIn;
+    if (solar.length === 0 && measuredOut > 0.05 * measuredIn) {
+      notes.unshift(
+        `${grid.map((m) => m.name).join(', ')} exported ${Math.round(measuredOut).toLocaleString()} kWh, but no solar file is assigned. ` +
+          'Consumption = import − export + solar, so without the solar file it comes out far too low. Add the solar meter file.',
+      );
+    }
+    if (lost > 1) {
+      notes.push(
+        `Grid meter: ${Math.round(measuredIn).toLocaleString()} kWh imported and ${Math.round(measuredOut).toLocaleString()} kWh exported. ` +
+          `The simulation works hour by hour, where ${Math.round(lost).toLocaleString()} kWh of import and export in the same hour ` +
+          `(${((lost / Math.max(1, measuredIn)) * 100).toFixed(1)} % of import) cancel out; the meter and HomeWizard count both. ` +
+          'Battery savings are therefore slightly conservative.',
+      );
+    }
   }
   if (missing) notes.push(`${missing.toLocaleString()} hours skipped because a grid, consumption or solar file had no data.`);
   if (filledZero) notes.push(`${filledZero.toLocaleString()} hours had no EV or water-heater data; counted as 0, so that use stays in household load.`);

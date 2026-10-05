@@ -21,6 +21,13 @@ describe('dataset persistence encoding', () => {
     });
   });
 
+  it('keeps measured grid flows', () => {
+    const samples = demoYear(2024).slice(0, 48).map((s) => ({ ...s, gridIn: 0.5, gridOut: 0.25 }));
+    const back = decodeDataset(encodeDataset({ samples, label: 'g', notes: [], savedAt: 1 }))!;
+    expect(back.samples[10].gridIn).toBeCloseTo(0.5, 3);
+    expect(back.samples[10].gridOut).toBeCloseTo(0.25, 3);
+  });
+
   it('rejects corrupt or foreign data', () => {
     expect(decodeDataset('not json')).toBeNull();
     expect(decodeDataset('{"v":2}')).toBeNull();

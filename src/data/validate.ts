@@ -17,6 +17,9 @@ export interface Totals {
   gridImport: number;
   /** Grid export with no battery. */
   gridExport: number;
+  /** Grid import/export as measured by a grid meter (0 when none was loaded). */
+  meterImport: number;
+  meterExport: number;
   hours: number;
 }
 
@@ -73,7 +76,7 @@ function localMonth(t: number): string {
 }
 
 function emptyTotals(): Totals {
-  return { house: 0, ev: 0, wh: 0, solar: 0, gridImport: 0, gridExport: 0, hours: 0 };
+  return { house: 0, ev: 0, wh: 0, solar: 0, gridImport: 0, gridExport: 0, meterImport: 0, meterExport: 0, hours: 0 };
 }
 
 function add(totals: Totals, s: HourSample) {
@@ -85,6 +88,8 @@ function add(totals: Totals, s: HourSample) {
   totals.solar += s.solar;
   totals.gridImport += Math.max(0, load - s.solar);
   totals.gridExport += Math.max(0, s.solar - load);
+  totals.meterImport += s.gridIn ?? 0;
+  totals.meterExport += s.gridOut ?? 0;
   totals.hours++;
 }
 
@@ -144,6 +149,24 @@ export function hourProfile(samples: HourSample[]): HourProfile {
 
 /** Thresholds for "this hour looks wrong". A home rarely averages 12 kW for a full hour; 22 kW is the largest AC home charger. */
 export const LIMITS = { houseKwh: 12, evKwh: 22, whKwh: 6, nightSolarKwh: 0.05 };
+
+/** True when the dataset carries measured grid import/export from a grid meter. */
+export function hasMeterGrid(samples: HourSample[]): boolean {
+  return samples.some((s) => s.gridIn !== undefined);
+}
+
+/** Last 12 months of a longer dataset, so each season counts once when annualising. */
+export function lastTwelveMonths(samples: HourSample[]): HourSample[] {
+  if (samples.length === 0) return samples;
+  const cutoff = new Date(samples[samples.length - 1].t);
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  return samples.filter((s) => s.t > cutoff.getTime());
+}
+
+/** True when the dataset covers clearly more than a year. */
+export function spansMoreThanAYear(samples: HourSample[]): boolean {
+  return samples.length > 0 && samples[samples.length - 1].t - samples[0].t > 380 * 24 * HOUR_MS;
+}
 
 /** True when the dataset has a separately metered water heater. */
 export function hasWaterHeater(samples: HourSample[]): boolean {
@@ -305,13 +328,17 @@ function isoWithOffset(t: number): string {
 export function toCsv(samples: HourSample[]): string {
   const withWh = hasWaterHeater(samples);
   const withRate = samples.some((s) => s.rate);
+  const withMeter = hasMeterGrid(samples);
   const rows = samples.map((s) => {
     const wh = s.wh ?? 0;
     let row = `${isoWithOffset(s.t)},${(s.house + s.ev + wh).toFixed(3)},${s.solar.toFixed(3)},${s.ev.toFixed(3)}`;
     if (withWh) row += `,${wh.toFixed(3)}`;
     if (withRate) row += `,${s.rate ?? ''}`;
+    if (withMeter) row += `,${(s.gridIn ?? 0).toFixed(3)},${(s.gridOut ?? 0).toFixed(3)}`;
     return row;
   });
-  const header = `timestamp,consumption_kwh,solar_kwh,ev_kwh${withWh ? ',water_heater_kwh' : ''}${withRate ? ',tariff_register' : ''}`;
+  const header =
+    `timestamp,consumption_kwh,solar_kwh,ev_kwh${withWh ? ',water_heater_kwh' : ''}${withRate ? ',tariff_register' : ''}` +
+    (withMeter ? ',grid_import_kwh,grid_export_kwh' : '');
   return [header, ...rows].join('\n') + '\n';
 }

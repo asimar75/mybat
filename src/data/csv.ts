@@ -72,7 +72,9 @@ export function parseCsv(text: string): CsvResult {
     return Number.isFinite(v) ? Math.max(0, v) : 0;
   };
 
-  const hours = new Map<number, { consumption: number; solar: number; ev: number; wh: number; rate?: 1 | 2 }>();
+  const hours = new Map<number, { consumption: number; solar: number; ev: number; wh: number; gi: number; ge: number; rate?: 1 | 2 }>();
+  // With a consumption column, grid columns are kept as measured meter values.
+  const measuredGrid = col.consumption >= 0 && col.gi >= 0 && col.ge >= 0;
   let skipped = 0;
   for (const line of lines.slice(1)) {
     const cells = line.split(delimiter);
@@ -85,11 +87,15 @@ export function parseCsv(text: string): CsvResult {
     const consumption =
       col.consumption >= 0 ? num(cells, col.consumption) : Math.max(0, num(cells, col.gi) - num(cells, col.ge) + solar);
     const hour = Math.floor(ts / HOUR_MS) * HOUR_MS;
-    const h = hours.get(hour) ?? { consumption: 0, solar: 0, ev: 0, wh: 0 };
+    const h = hours.get(hour) ?? { consumption: 0, solar: 0, ev: 0, wh: 0, gi: 0, ge: 0 };
     h.consumption += consumption;
     h.solar += solar;
     h.ev += num(cells, col.ev);
     h.wh += num(cells, col.wh);
+    if (measuredGrid) {
+      h.gi += num(cells, col.gi);
+      h.ge += num(cells, col.ge);
+    }
     const reg = col.rate >= 0 ? Number((cells[col.rate] ?? '').trim()) : 0;
     if (reg === 1 || reg === 2) h.rate = reg;
     hours.set(hour, h);
@@ -99,7 +105,7 @@ export function parseCsv(text: string): CsvResult {
     .sort((a, b) => a[0] - b[0])
     .map(([t, h]) => {
       const ev = Math.min(h.ev, h.consumption);
-      const rate = h.rate ? { rate: h.rate } : {};
+      const rate = { ...(h.rate ? { rate: h.rate } : {}), ...(measuredGrid ? { gridIn: h.gi, gridOut: h.ge } : {}) };
       if (col.wh < 0) return { t, solar: h.solar, ev, house: h.consumption - ev, ...rate };
       const wh = Math.min(h.wh, h.consumption - ev);
       return { t, solar: h.solar, ev, wh, house: h.consumption - ev - wh, ...rate };

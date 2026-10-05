@@ -140,6 +140,17 @@ it was counted on (Assumptions → Tariff → time-of-use). That follows schedul
 year, which a fixed peak window can't. The register that counts weekday daytime is preselected as
 peak, since conventions differ by country (in the Netherlands T1 is usually the cheap one).
 
+**Why the totals can differ from the HomeWizard app.** The summary and the monthly table show the
+grid meter's own import and export, which match the app. The simulation works hour by hour, so
+import and export within the same hour (a cloud passing, the kettle while the panels export) net out.
+The app reports how many kWh that is; typically 2–4 % of import. Consumption is
+`import − export + solar`, so **load the solar meter too**: without it, consumption comes out far
+too low (the app warns when the grid meter exports but no solar file is assigned).
+
+**More than a year of data** (e.g. two HomeWizard downloads, since 15-minute data is kept for one
+year): the app uses the last 12 months by default so each season counts once; switch to the whole
+period in the summary. Download every meter for the same period, or the shortest file sets the range.
+
 ### No Home Assistant?
 
 Use the **CSV files** tab with one file in this app's own format. Columns: `timestamp`, `consumption_kwh` (total incl. EV) **or**
@@ -187,7 +198,7 @@ battery's life, with yearly capacity loss, minus its cost). If none is positive,
 
 ### Known limits
 
-- **Hourly resolution** misses spikes inside an hour, so savings are slightly underestimated.
+- **Hourly resolution** misses spikes inside an hour and nets import against export within each hour, so savings are slightly underestimated.
 - **Less than a year of data** is scaled up, but solar is seasonal. A summer-only sample overstates winter performance.
 - Future tariffs, battery prices and degradation are your assumptions.
 
