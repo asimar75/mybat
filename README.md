@@ -122,9 +122,27 @@ surplus** (Strategy) moves each day's water heating into sunny hours, up to the 
 before the battery gets the surplus. The result always compares both timings, so you can see how
 much a timer or solar diverter saves on its own and how it changes the best battery size.
 
+### Meter exports (HomeWizard and similar)
+
+Monitoring apps such as **HomeWizard** export one CSV per meter: the P1 grid meter, kWh meters for
+solar, the EV charger, a water heater… In the **CSV files** tab, select all of them at once. The app:
+
+- detects running meter totals (HomeWizard's format) vs. energy per interval, any interval length
+- adds up registers such as `Import T1 kWh` + `Import T2 kWh`, and ignores power columns (`L1 max W`)
+- handles local timestamps with daylight-saving changes, gaps, and small counter glitches
+- proposes what each file is from its energy flows and name (a file that both imports and exports
+  is the grid meter, whatever it's called), shown in a table where you confirm or change it;
+  your choices are remembered by file name
+- by default uses only the period every file covers (untick to keep the longest period)
+
+If the grid meter has **T1/T2 registers**, each hour is priced as peak or off-peak from the register
+it was counted on (Assumptions → Tariff → time-of-use). That follows schedule changes during the
+year, which a fixed peak window can't. The register that counts weekday daytime is preselected as
+peak, since conventions differ by country (in the Netherlands T1 is usually the cheap one).
+
 ### No Home Assistant?
 
-Use the **CSV file** tab. Columns: `timestamp`, `consumption_kwh` (total incl. EV) **or**
+Use the **CSV files** tab with one file in this app's own format. Columns: `timestamp`, `consumption_kwh` (total incl. EV) **or**
 `grid_import_kwh` + `grid_export_kwh`, plus optional `solar_kwh`, `ev_kwh` and `water_heater_kwh`. A template is
 downloadable in the app.
 

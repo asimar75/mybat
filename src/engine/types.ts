@@ -10,6 +10,8 @@ export interface HourSample {
   ev: number;
   /** Water heater consumption, when it has its own meter (otherwise it's inside `house`). */
   wh?: number;
+  /** Tariff register (1 = T1, 2 = T2) the grid meter counted this hour's import on, when known. */
+  rate?: 1 | 2;
 }
 
 /**
@@ -45,6 +47,10 @@ export interface Tariff {
   peakEndHour: number;
   /** Price per kWh exported to the grid. */
   exportPrice: number;
+  /** Decide peak hours from the meter's T1/T2 register per hour instead of the fixed window. */
+  useMeterRegisters?: boolean;
+  /** Which register is the peak (expensive) one. */
+  peakRegister?: 1 | 2;
 }
 
 export interface SimOptions {

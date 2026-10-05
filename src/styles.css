@@ -656,3 +656,16 @@ tr.short td:last-child {
     display: block;
   }
 }
+
+.meter-table td,
+.meter-table th {
+  text-align: left;
+  white-space: normal;
+  vertical-align: top;
+}
+.meter-table td small {
+  color: var(--text-muted);
+}
+.meter-table select {
+  min-width: 190px;
+}

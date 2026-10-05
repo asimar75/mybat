@@ -28,6 +28,7 @@ const ALIASES: Record<string, string[]> = {
   solar: ['solar_kwh', 'solar', 'pv', 'pv_kwh', 'production', 'production_kwh'],
   ev: ['ev_kwh', 'ev', 'car', 'ev_charger', 'charger_kwh'],
   wh: ['water_heater_kwh', 'water_heater', 'wh_kwh', 'dhw_kwh', 'hot_water_kwh', 'boiler_kwh'],
+  rate: ['tariff_register', 'register', 'tariff'],
 };
 
 export interface CsvResult {
@@ -56,6 +57,7 @@ export function parseCsv(text: string): CsvResult {
     solar: findColumn(headers, 'solar'),
     ev: findColumn(headers, 'ev'),
     wh: findColumn(headers, 'wh'),
+    rate: findColumn(headers, 'rate'),
   };
   if (col.t < 0) throw new Error('No timestamp column found (expected a header named "timestamp").');
   if (col.consumption < 0 && col.gi < 0) {
@@ -70,7 +72,7 @@ export function parseCsv(text: string): CsvResult {
     return Number.isFinite(v) ? Math.max(0, v) : 0;
   };
 
-  const hours = new Map<number, { consumption: number; solar: number; ev: number; wh: number }>();
+  const hours = new Map<number, { consumption: number; solar: number; ev: number; wh: number; rate?: 1 | 2 }>();
   let skipped = 0;
   for (const line of lines.slice(1)) {
     const cells = line.split(delimiter);
@@ -88,6 +90,8 @@ export function parseCsv(text: string): CsvResult {
     h.solar += solar;
     h.ev += num(cells, col.ev);
     h.wh += num(cells, col.wh);
+    const reg = col.rate >= 0 ? Number((cells[col.rate] ?? '').trim()) : 0;
+    if (reg === 1 || reg === 2) h.rate = reg;
     hours.set(hour, h);
   }
 
@@ -95,9 +99,10 @@ export function parseCsv(text: string): CsvResult {
     .sort((a, b) => a[0] - b[0])
     .map(([t, h]) => {
       const ev = Math.min(h.ev, h.consumption);
-      if (col.wh < 0) return { t, solar: h.solar, ev, house: h.consumption - ev };
+      const rate = h.rate ? { rate: h.rate } : {};
+      if (col.wh < 0) return { t, solar: h.solar, ev, house: h.consumption - ev, ...rate };
       const wh = Math.min(h.wh, h.consumption - ev);
-      return { t, solar: h.solar, ev, wh, house: h.consumption - ev - wh };
+      return { t, solar: h.solar, ev, wh, house: h.consumption - ev - wh, ...rate };
     });
   if (samples.length === 0) throw new Error('No rows with a readable timestamp were found.');
   return { samples, rows: lines.length - 1, skipped };

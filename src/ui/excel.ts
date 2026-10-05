@@ -47,6 +47,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   const first = input.samples[0]?.t ?? 0;
   const last = input.samples[input.samples.length - 1]?.t ?? 0;
   const withWh = hasWaterHeater(input.samples);
+  const withRate = input.samples.some((s) => s.rate);
 
   // ---- Summary ----
   const summary: Cell[][] = [
@@ -92,7 +93,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
     summary.push(
       [text('Peak price per kWh'), num(tariff.importPeak, '0.000')],
       [text('Off-peak price per kWh'), num(tariff.importOffPeak, '0.000')],
-      [text('Peak hours'), text(`${tariff.peakStartHour}:00 – ${tariff.peakEndHour}:00`)],
+      [text('Peak hours'), text(tariff.useMeterRegisters && withRate ? `From the meter's registers (T${tariff.peakRegister ?? 1} = peak)` : `${tariff.peakStartHour}:00 – ${tariff.peakEndHour}:00`)],
     );
   } else {
     summary.push([text('Import price per kWh'), num(tariff.importFlat, '0.000')]);
@@ -165,13 +166,14 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   // ---- Hourly ----
   const hourly: Cell[][] = [
-    header(['Time', 'House kWh', 'EV kWh', ...(withWh ? ['Water heater kWh'] : []), 'Solar kWh']),
+    header(['Time', 'House kWh', 'EV kWh', ...(withWh ? ['Water heater kWh'] : []), 'Solar kWh', ...(withRate ? ['Tariff register'] : [])]),
     ...input.samples.map((s) => [
       { value: localDate(s.t), type: Date, format: 'yyyy-mm-dd hh:mm' } as Cell,
       num(s.house, '0.000'),
       num(s.ev, '0.000'),
       ...(withWh ? [num(s.wh ?? 0, '0.000')] : []),
       num(s.solar, '0.000'),
+      ...(withRate ? [text(s.rate ? `T${s.rate}` : '')] : []),
     ]),
   ];
 

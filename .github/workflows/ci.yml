@@ -16,4 +16,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Again in a time zone with daylight saving, so clock-change handling in imports stays tested.
+      - run: npm test
+        env:
+          TZ: Europe/Amsterdam
       - run: npm run build

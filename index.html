@@ -26,8 +26,13 @@
             <label data-flat>Import price per kWh <input name="importFlat" type="number" step="0.01" min="0" value="0.30" /></label>
             <label data-tou>Peak price per kWh <input name="importPeak" type="number" step="0.01" min="0" value="0.36" /></label>
             <label data-tou>Off-peak price per kWh <input name="importOffPeak" type="number" step="0.01" min="0" value="0.20" /></label>
-            <label data-tou>Peak starts (hour) <input name="peakStartHour" type="number" min="0" max="23" value="7" /></label>
-            <label data-tou>Peak ends (hour) <input name="peakEndHour" type="number" min="0" max="24" value="23" /></label>
+            <label class="check" data-tou data-registers><input name="useMeterRegisters" type="checkbox" checked /> Use my meter's T1/T2 registers for peak hours</label>
+            <label data-tou data-registers>Peak register
+              <select name="peakRegister"><option value="1">T1 is peak (expensive)</option><option value="2">T2 is peak (expensive)</option></select>
+            </label>
+            <p class="hint" data-tou data-registers style="margin:0">Each hour is priced by the register your meter counted it on, so schedule changes during the year are followed.</p>
+            <label data-tou data-window>Peak starts (hour) <input name="peakStartHour" type="number" min="0" max="23" value="7" /></label>
+            <label data-tou data-window>Peak ends (hour) <input name="peakEndHour" type="number" min="0" max="24" value="23" /></label>
             <label>Export (feed-in) price per kWh <input name="exportPrice" type="number" step="0.01" min="0" value="0.08" /></label>
           </fieldset>
           <fieldset>
@@ -90,7 +95,7 @@
         <h2><span class="step">1</span> Your energy data</h2>
         <div class="tabs" role="tablist">
           <button role="tab" data-tab="ha" aria-selected="true">Home Assistant</button>
-          <button role="tab" data-tab="csv" aria-selected="false">CSV file</button>
+          <button role="tab" data-tab="csv" aria-selected="false">CSV files</button>
           <button role="tab" data-tab="demo" aria-selected="false">Demo data</button>
         </div>
 
@@ -142,12 +147,24 @@
 
         <div class="tab-panel" data-panel="csv" hidden>
           <p class="hint">
-            Columns: <code>timestamp</code>, <code>consumption_kwh</code> (total use <em>including</em> the car) or
-            <code>grid_import_kwh</code> + <code>grid_export_kwh</code>, plus optional <code>solar_kwh</code>,
-            <code>ev_kwh</code> and <code>water_heater_kwh</code>. Any row interval works; rows are summed into hours.
+            <b>Meter exports, e.g. from HomeWizard:</b> select all the files at once, one per meter (grid/P1 meter,
+            solar, EV charger, water heater). Running meter totals or per-interval values, any interval, T1/T2 tariff
+            registers and daylight-saving changes are handled; you confirm what each file is before loading.
+          </p>
+          <p class="hint">
+            Or one combined file in this app's own format: <code>timestamp</code>, <code>consumption_kwh</code> (total
+            use <em>including</em> the car) or <code>grid_import_kwh</code> + <code>grid_export_kwh</code>, plus optional
+            <code>solar_kwh</code>, <code>ev_kwh</code>, <code>water_heater_kwh</code>.
             <a href="#" id="csv-template">Download a template</a>.
           </p>
-          <input id="csv-file" type="file" accept=".csv,.tsv,.txt,text/csv" />
+          <input id="csv-file" type="file" multiple accept=".csv,.tsv,.txt,text/csv" />
+          <div id="meter-files" hidden>
+            <div class="scroll"><table class="meter-table"><thead><tr>
+              <th>File</th><th>Contents</th><th>Period</th><th>Import / export kWh</th><th>What is it?</th>
+            </tr></thead><tbody id="meter-rows"></tbody></table></div>
+            <label class="check"><input id="meter-common" type="checkbox" checked /> Only use the period every file covers</label>
+            <div class="actions"><button id="meter-load" class="primary" type="button">Load these files</button></div>
+          </div>
         </div>
 
         <div class="tab-panel" data-panel="demo" hidden>
