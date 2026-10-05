@@ -9,7 +9,7 @@ import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole,
 import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
-import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
+import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, twelveMonthsFrom, yearStarts, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, loadDataset, saveDataset } from './data/persist';
 import { renderBatteryCharts, renderCharts, renderDataCharts } from './ui/charts';
 import { exportExcel } from './ui/excel';
@@ -72,13 +72,22 @@ if (savedTab) document.querySelector<HTMLButtonElement>(`[role=tab][data-tab="${
 
 // ---------- data loading ----------
 
-/** Everything loaded; `data` is the part in use (all of it, or the last 12 months of a longer set). */
+/** Everything loaded; `data` is the part in use (all of it, the last 12 months, or 12 calendar months). */
 let allSamples: HourSample[] = [];
 const PERIOD_KEY = 'mybat.period';
-const usingLastYear = () => spansMoreThanAYear(allSamples) && storage.get(PERIOD_KEY) !== 'all';
+
+/** 'all', '12m' (last 12 months) or the 'YYYY-MM' a 12-month window starts in. Only longer sets get a choice. */
+function periodChoice(): string {
+  if (!spansMoreThanAYear(allSamples)) return 'all';
+  const saved = storage.get(PERIOD_KEY);
+  if (saved === 'all') return 'all';
+  if (saved && yearStarts(allSamples).includes(saved)) return saved;
+  return '12m';
+}
 
 function applyPeriod() {
-  data = prepare(usingLastYear() ? lastTwelveMonths(allSamples) : allSamples);
+  const choice = periodChoice();
+  data = prepare(choice === 'all' ? allSamples : choice === '12m' ? lastTwelveMonths(allSamples) : twelveMonthsFrom(allSamples, choice));
   simData = null;
   altData = null;
   syncVisibility();
@@ -516,6 +525,13 @@ function evFromGrid(samples: HourSample[]): number {
   return total;
 }
 
+/** 'YYYY-MM' of the 12th month of a window starting at `month`. */
+function lastMonthOf(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m + 10, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function renderSummary() {
   if (!data) return;
   const s = data.samples;
@@ -531,19 +547,26 @@ function renderSummary() {
     );
   }
   const longer = spansMoreThanAYear(allSamples);
-  const periodChoice = longer
+  const choice = periodChoice();
+  const option = (value: string, label: string) => `<option value="${value}"${choice === value ? ' selected' : ''}>${label}</option>`;
+  const periodSelect = longer
     ? `<label class="period-choice">Period used
         <select id="period-select">
-          <option value="12m"${usingLastYear() ? ' selected' : ''}>Last 12 months (each season once)</option>
-          <option value="all"${usingLastYear() ? '' : ' selected'}>All ${dateRange(allSamples[0].t, allSamples[allSamples.length - 1].t)}</option>
+          ${option('12m', 'Last 12 months (each season once)')}
+          <optgroup label="12 calendar months, to compare with a monitoring app's year">
+            ${yearStarts(allSamples)
+              .map((m) => option(m, `${fmtMonth(m)} – ${fmtMonth(lastMonthOf(m))}${m.endsWith('-08') ? ' (HomeWizard year view)' : ''}`))
+              .join('')}
+          </optgroup>
+          ${option('all', `All ${dateRange(allSamples[0].t, allSamples[allSamples.length - 1].t)}`)}
         </select>
       </label>`
     : '';
-  if (longer && !usingLastYear()) {
+  if (choice === 'all' && longer) {
     notes.unshift('Using more than a year: some seasons count twice when results are scaled to one year (e.g. two summers and one winter overstate solar).');
   }
   $('#summary').innerHTML = `
-    ${periodChoice}
+    ${periodSelect}
     <dl class="stats">
       <div><dt>Period</dt><dd>${dateRange(s[0].t, s[s.length - 1].t)}<small>${data.days} days</small></dd></div>
       ${tile('Total use', total((x) => x.house + x.ev + (x.wh ?? 0)))}

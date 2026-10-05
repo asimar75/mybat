@@ -163,6 +163,35 @@ export function lastTwelveMonths(samples: HourSample[]): HourSample[] {
   return samples.filter((s) => s.t > cutoff.getTime());
 }
 
+/** Local midnight on the 1st of a 'YYYY-MM' month, shifted by `add` months. */
+function monthStart(month: string, add = 0): number {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(y, m - 1 + add, 1).getTime();
+}
+
+/**
+ * Months ('YYYY-MM') that start a full 12 calendar months inside the data, e.g. '2025-08' for
+ * Aug–Jul like the HomeWizard year view. Edge months must be complete (one hour of slack).
+ */
+export function yearStarts(samples: HourSample[]): string[] {
+  if (samples.length === 0) return [];
+  const first = samples[0].t;
+  const last = samples[samples.length - 1].t;
+  const out: string[] = [];
+  for (let month = localMonth(first - HOUR_MS); ; month = localMonth(monthStart(month, 1))) {
+    if (monthStart(month, 12) > last + 2 * HOUR_MS) break;
+    if (monthStart(month) >= first - HOUR_MS) out.push(month);
+  }
+  return out;
+}
+
+/** The 12 calendar months starting at `month` ('YYYY-MM'). */
+export function twelveMonthsFrom(samples: HourSample[], month: string): HourSample[] {
+  const from = monthStart(month);
+  const to = monthStart(month, 12);
+  return samples.filter((s) => s.t >= from && s.t < to);
+}
+
 /** True when the dataset covers clearly more than a year. */
 export function spansMoreThanAYear(samples: HourSample[]): boolean {
   return samples.length > 0 && samples[samples.length - 1].t - samples[0].t > 380 * 24 * HOUR_MS;
