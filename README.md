@@ -195,14 +195,22 @@ For every hour:
    would empty the home battery every session.
 4. Optional (time-of-use tariffs): charge from the grid off-peak, hold the charge for peak hours.
 
-The recommended size is the one with the highest **lifetime net benefit** (savings over the
-battery's life, with yearly capacity loss, minus its cost). If none is positive, the app says so.
+The recommended size is the one with the highest **net benefit** over the period you compare
+(10, 20, 30 or 40 years): savings, minus the purchase, minus replacements, plus the value of the
+life left in the last battery at the end (straight-line). If none is positive, the app says so.
+
+**Wear and replacement.** A battery loses capacity from age (default 1 % a year) and from cycling:
+its rated cycles (LFP: about 6,000) use up the 30 % down to 70 % capacity, when it's replaced at a
+share of today's price (default 70 %, since prices keep falling). The simulation counts each size's
+cycles from your data, so a bigger battery, cycling less, lasts longer. As it fades, a battery saves
+what a smaller new one would, so an oversized battery hardly notices its wear.
 
 ### Known limits
 
 - **Hourly resolution** misses spikes inside an hour and nets import against export within each hour, so savings are slightly underestimated.
 - **Less than a year of data** is scaled up, but solar is seasonal. A summer-only sample overstates winter performance.
 - Future tariffs, battery prices and degradation are your assumptions.
+- Money isn't discounted: a euro saved in 30 years counts the same as one today, which flatters long periods.
 
 ## Project layout
 

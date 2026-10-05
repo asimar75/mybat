@@ -432,8 +432,10 @@ function readSettings() {
   const economics: Economics = {
     costPerKwh: n('costPerKwh', 450),
     fixedCost: n('fixedCost', 1500),
-    lifetimeYears: Math.max(1, n('lifetimeYears', 12)),
-    degradationPerYear: n('degradationPct', 2) / 100,
+    horizonYears: Math.max(1, n('horizonYears', 20)),
+    calendarLossPerYear: Math.max(0, n('calendarLossPct', 1)) / 100,
+    cycleLife: Math.max(100, n('cycleLife', 6000)),
+    replacementFraction: Math.max(0, n('replacementPct', 70)) / 100,
   };
   const template = {
     usableFraction: Math.min(1, Math.max(0.1, n('usablePct', 95) / 100)),
@@ -620,7 +622,7 @@ function recompute() {
   lastCfg = cfg;
   lastReimb = cfg.reimb.on ? reimbursement(simData.samples, cfg.reimb.prices) : null;
   const extra = [whItem, lastReimb ? reimbursementInsight(rec, lastReimb, cfg.currency) : ''].filter(Boolean);
-  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.lifetimeYears, scenarioNote(rec, cfg), extra);
+  renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.horizonYears, scenarioNote(rec, cfg), extra);
 }
 
 /**
@@ -671,6 +673,7 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
         <p>${num1(best.usableKwh)} kWh usable, ${num1(best.powerKw)} kW. Costs ${money(best.investment, currency)},
         saves ${money(best.annualSavings, currency)} in year one, pays back in ${years(best.paybackYears)}, and leaves you
         <b>${money(best.netBenefit, currency)}</b> ahead over ${lifetime} years.</p>
+        <p>${lifespan(best, currency, lifetime)}</p>
         <p>Self-sufficiency goes from ${pct(base.selfSufficiency)} to ${pct(best.annual.selfSufficiency)}.</p>
       </div>`;
   }
@@ -686,6 +689,18 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
     </div>`;
 }
 
+const lasts = (r: SweepRow) => (Number.isFinite(r.lifeYears) ? years(r.lifeYears) : 'indefinitely');
+
+/** How long a size lasts and what wear costs over the comparison period. */
+function lifespan(r: SweepRow, currency: string, horizon: number): string {
+  const life = Number.isFinite(r.lifeYears) ? `about ${years(r.lifeYears)}` : lasts(r);
+  const replaced = r.replacements
+    ? `replaced ${r.replacements === 1 ? 'once' : `${r.replacements} times`} within ${horizon} years (${money(r.replacementCost, currency)})`
+    : `not replaced within ${horizon} years`;
+  return `At ${Math.round(r.annual.cycles)} cycles a year it lasts ${life} before dropping to 70 % capacity, so it's ${replaced}; ` +
+    `the life left at the end is worth ${money(r.residualValue, currency)}, counted in the net benefit.`;
+}
+
 function insights(rec: Recommendation, focus: SweepRow | null, currency: string, evMode: string, extra: string[] = []): string {
   if (!data) return '';
   const items: string[] = [...extra];
@@ -693,6 +708,18 @@ function insights(rec: Recommendation, focus: SweepRow | null, currency: string,
   if (rec.knee) {
     items.push(
       `<b>${rec.knee.nominalKwh} kWh</b> already captures 90 % of the maximum possible saving. Beyond that, each extra kWh adds little.`,
+    );
+  }
+  const sized = rec.rows.filter((r) => r.nominalKwh > 0);
+  if (sized.length > 1) {
+    const small = sized[0];
+    const large = sized[sized.length - 1];
+    items.push(
+      `<b>Bigger batteries cycle less and last longer:</b> ${small.nominalKwh} kWh does ${Math.round(small.annual.cycles)} cycles a year and lasts ${lasts(small)}; ` +
+        `${large.nominalKwh} kWh does ${Math.round(large.annual.cycles)} and lasts ${lasts(large)}. ` +
+        (large.lifeYears > small.lifeYears * 1.3
+          ? 'Replacements and leftover value are in the net benefit of each size.'
+          : 'Age, not cycling, sets the life here, so size barely changes it.'),
     );
   }
   if (focus) {
@@ -734,7 +761,9 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
         <td>${money(r.investment, currency)}</td><td>${money(r.annualSavings, currency)}</td>
         <td>${r.nominalKwh ? years(r.paybackYears) : '–'}</td><td>${r.nominalKwh ? money(r.netBenefit, currency) : '–'}</td>
         <td>${pct(r.annual.selfSufficiency)}</td><td>${kwh(r.annual.importKwh)}</td>
-        <td>${num1(r.annual.cycles)}</td></tr>`;
+        <td>${num1(r.annual.cycles)}</td>
+        <td>${r.nominalKwh ? lasts(r) : '–'}</td><td>${r.nominalKwh ? r.replacements : '–'}</td>
+        <td>${r.nominalKwh ? money(r.residualValue, currency) : '–'}</td></tr>`;
     })
     .join('');
   return `
@@ -745,6 +774,7 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
           <thead><tr>
             <th>Size kWh</th><th>Usable</th><th>Power kW</th><th>Cost</th><th>Saving / yr</th>
             <th>Payback</th><th>Net benefit</th><th>Self-suff.</th><th>Grid import / yr</th><th>Cycles / yr</th>
+            <th>Lasts</th><th>Replacements</th><th>Value left</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -777,7 +807,7 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
     ${insights(rec, focus, currency, evMode, extra)}
     <div class="charts">
       <figure>
-        <figcaption>Lifetime savings vs. battery cost<small>Savings above the cost line means the battery pays for itself</small></figcaption>
+        <figcaption>Savings vs. battery cost over the period<small>Cost = purchase + replacements − value left at the end. Savings above the cost line means the battery pays for itself</small></figcaption>
         <div class="chart-box"><canvas id="chart-economics" role="img" aria-label="Lifetime savings and battery cost by size"></canvas></div>
       </figure>
       <figure>

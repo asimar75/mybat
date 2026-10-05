@@ -73,9 +73,14 @@ export interface Economics {
   costPerKwh: number;
   /** Fixed cost: hybrid inverter, installation, permits. Paid once for any non-zero size. */
   fixedCost: number;
-  lifetimeYears: number;
-  /** Yearly capacity loss, 0–1 (0.02 = 2 %/year). */
-  degradationPerYear: number;
+  /** Years the comparison runs over; batteries worn out before the end are replaced. */
+  horizonYears: number;
+  /** Capacity lost per year from age alone, 0–1 (0.01 = 1 %/year), however much the battery is used. */
+  calendarLossPerYear: number;
+  /** Full cycles the cells are rated for before reaching END_OF_LIFE capacity (LFP: about 6,000). */
+  cycleLife: number;
+  /** Price of a replacement, as a fraction of today's total price (battery prices keep falling). */
+  replacementFraction: number;
 }
 
 export interface SimResult {
