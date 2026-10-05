@@ -5,6 +5,7 @@ import { createTrace, prepare, simulate, usableKwh, type PreparedData } from './
 import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/sweep';
 import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
 import { CSV_TEMPLATE, parseCsv } from './data/csv';
+import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole, type ParsedMeter } from './data/meters';
 import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
@@ -104,13 +105,95 @@ $('#csv-template').addEventListener('click', (e) => {
   downloadText(CSV_TEMPLATE, 'battery-sizer-template.csv');
 });
 
-$<HTMLInputElement>('#csv-file').addEventListener('change', async (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (!file) return;
+// One file in the app's own format loads directly; anything else is treated as per-meter exports
+// (HomeWizard and similar), shown in a table so each file's role can be confirmed first.
+const isTemplateFormat = (text: string) => /consumption_kwh|grid_import_kwh/i.test(text.split(/\r?\n/, 1)[0]);
+let meterFiles: { meter: ParsedMeter | null; name: string; error?: string; role: MeterRole }[] = [];
+const ROLE_KEY = 'mybat.meterRoles';
+const roleKey = (name: string) => name.toLowerCase().replace(/\.(csv|tsv|txt)$/, '');
+
+function savedRoles(): Record<string, MeterRole> {
   try {
-    const r = parseCsv(await file.text());
-    const notes = r.skipped > 0 ? [`${r.skipped} rows had an unreadable timestamp and were skipped.`] : [];
-    setData(r.samples, `${file.name} (${r.rows.toLocaleString()} rows)`, notes);
+    return JSON.parse(storage.get(ROLE_KEY) ?? '{}') as Record<string, MeterRole>;
+  } catch {
+    return {};
+  }
+}
+
+function renderMeterFiles() {
+  const fmt = (t: number) => new Date(t).toLocaleDateString();
+  $('#meter-rows').innerHTML = meterFiles
+    .map((f, i) => {
+      if (!f.meter) return `<tr><td>${escapeHtml(f.name)}</td><td colspan="4" class="flag">${escapeHtml(f.error ?? 'Unreadable')}</td></tr>`;
+      const m = f.meter;
+      const cols = [...m.importColumns, ...m.exportColumns].join(', ');
+      const kind = `${m.cumulative ? 'meter readings' : 'energy per interval'}, every ${m.intervalMinutes} min${m.hasRegisters ? ', T1/T2' : ''}`;
+      const options = (Object.keys(ROLE_LABELS) as MeterRole[])
+        .map((r) => `<option value="${r}"${r === f.role ? ' selected' : ''}>${ROLE_LABELS[r]}</option>`)
+        .join('');
+      return `<tr>
+        <td><b>${escapeHtml(f.name)}</b></td>
+        <td>${escapeHtml(cols)}<br><small>${kind}</small></td>
+        <td>${fmt(m.firstHour)} – ${fmt(m.lastHour)}</td>
+        <td>${kwh(m.importTotal)} / ${kwh(m.exportTotal)}</td>
+        <td><select data-meter="${i}">${options}</select></td></tr>`;
+    })
+    .join('');
+  $('#meter-files').hidden = meterFiles.length === 0;
+}
+
+$<HTMLInputElement>('#csv-file').addEventListener('change', async (e) => {
+  const files = [...((e.target as HTMLInputElement).files ?? [])];
+  if (files.length === 0) return;
+  try {
+    const texts = await Promise.all(files.map((f) => f.text()));
+    if (files.length === 1 && isTemplateFormat(texts[0])) {
+      meterFiles = [];
+      renderMeterFiles();
+      const r = parseCsv(texts[0]);
+      const notes = r.skipped > 0 ? [`${r.skipped} rows had an unreadable timestamp and were skipped.`] : [];
+      setData(r.samples, `${files[0].name} (${r.rows.toLocaleString()} rows)`, notes);
+      return;
+    }
+    const remembered = savedRoles();
+    meterFiles = files.map((f, i) => {
+      try {
+        const meter = parseMeterCsv(f.name, texts[i]);
+        return { meter, name: f.name, role: remembered[roleKey(f.name)] ?? suggestRole(meter) };
+      } catch (err) {
+        return { meter: null, name: f.name, error: (err as Error).message, role: 'ignore' as MeterRole };
+      }
+    });
+    renderMeterFiles();
+    setStatus('Check what each file is, then load them.', 'info');
+  } catch (err) {
+    setStatus((err as Error).message, 'error');
+  }
+});
+
+$('#meter-rows').addEventListener('change', (e) => {
+  const el = e.target as HTMLSelectElement;
+  const f = meterFiles[Number(el.dataset.meter)];
+  if (!f) return;
+  f.role = el.value as MeterRole;
+  storage.set(ROLE_KEY, JSON.stringify({ ...savedRoles(), [roleKey(f.name)]: f.role }));
+});
+
+$('#meter-load').addEventListener('click', () => {
+  try {
+    const assigned = meterFiles.filter((f) => f.meter && f.role !== 'ignore').map((f) => ({ meter: f.meter!, role: f.role }));
+    const r = combineMeters(assigned, $<HTMLInputElement>('#meter-common').checked);
+    if (r.peakRegisterGuess) {
+      (form.elements.namedItem('peakRegister') as HTMLSelectElement).value = String(r.peakRegisterGuess);
+      saveSettings();
+      r.notes.unshift(
+        `T${r.peakRegisterGuess} counts weekday daytime, so it's set as the peak register` +
+          ((form.elements.namedItem('useTimeOfUse') as HTMLInputElement).checked
+            ? '.'
+            : '. Turn on time-of-use pricing under Assumptions → Tariff and enter your peak and off-peak prices to use it.'),
+      );
+    }
+    setData(r.samples, `${assigned.length} meter files`, r.notes);
   } catch (err) {
     setStatus((err as Error).message, 'error');
   }
@@ -310,6 +393,7 @@ function readSettings() {
   const b = (name: string) => (form.elements.namedItem(name) as HTMLInputElement).checked;
   const s = (name: string) => (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value;
 
+  const hasRegisters = data !== null && data.samples.some((x) => x.rate);
   const tariff: Tariff = {
     importFlat: n('importFlat', 0.3),
     useTimeOfUse: b('useTimeOfUse'),
@@ -318,6 +402,8 @@ function readSettings() {
     peakStartHour: n('peakStartHour', 7),
     peakEndHour: n('peakEndHour', 23),
     exportPrice: n('exportPrice', 0.08),
+    useMeterRegisters: hasRegisters && b('useMeterRegisters'),
+    peakRegister: s('peakRegister') === '2' ? 2 : 1,
   };
   const options: SimOptions = {
     evMode: s('evMode') === 'include' ? 'include' : 'exclude',
@@ -352,6 +438,11 @@ function syncVisibility() {
   form.querySelectorAll<HTMLElement>('[data-tou]').forEach((el) => (el.hidden = !tou));
   form.querySelectorAll<HTMLElement>('[data-flat]').forEach((el) => (el.hidden = tou));
   form.querySelectorAll<HTMLElement>('[data-gridcharge]').forEach((el) => (el.hidden = !tou || !gridCharge));
+  // T1/T2 option only when the data has registers; the fixed window hides while it's in use.
+  const registers = data !== null && data.samples.some((x) => x.rate);
+  const useRegisters = registers && (form.elements.namedItem('useMeterRegisters') as HTMLInputElement).checked;
+  form.querySelectorAll<HTMLElement>('[data-registers]').forEach((el) => (el.hidden = !tou || !registers));
+  form.querySelectorAll<HTMLElement>('[data-window]').forEach((el) => (el.hidden = !tou || useRegisters));
   // Water-heater options only make sense when the data has a separately metered water heater.
   const wh = data !== null && hasWaterHeater(data.samples);
   const whShift = (form.elements.namedItem('whShift') as HTMLInputElement).checked;

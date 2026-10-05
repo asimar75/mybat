@@ -45,15 +45,20 @@ export function prepare(samples: HourSample[]): PreparedData {
   return { samples, hourOfDay, dayIndex, monthKeys, monthIndex, days: day + 1 };
 }
 
-export function isPeakHour(hour: number, tariff: Tariff): boolean {
+/**
+ * Peak or off-peak. With meter registers enabled and known for this hour, the register decides
+ * (this follows schedule changes during the year); otherwise the fixed daily window does.
+ */
+export function isPeakHour(hour: number, tariff: Tariff, rate?: 1 | 2): boolean {
+  if (tariff.useMeterRegisters && rate) return rate === (tariff.peakRegister ?? 1);
   const { peakStartHour: s, peakEndHour: e } = tariff;
   if (s === e) return false;
   return s < e ? hour >= s && hour < e : hour >= s || hour < e;
 }
 
-export function importPrice(hour: number, tariff: Tariff): number {
+export function importPrice(hour: number, tariff: Tariff, rate?: 1 | 2): number {
   if (!tariff.useTimeOfUse) return tariff.importFlat;
-  return isPeakHour(hour, tariff) ? tariff.importPeak : tariff.importOffPeak;
+  return isPeakHour(hour, tariff, rate) ? tariff.importPeak : tariff.importOffPeak;
 }
 
 export function usableKwh(spec: BatterySpec): number {
@@ -168,7 +173,7 @@ export function simulate(
     const exported = solarLeft - solarCharge;
 
     // 3. Shortfall → battery → grid.
-    const offPeakHold = gridChargeOn && !isPeakHour(hour, tariff);
+    const offPeakHold = gridChargeOn && !isPeakHour(hour, tariff, s.rate);
     const batteryDemand = houseDeficit + (options.evMode === 'include' ? evDeficit : 0);
     let delivered = 0;
     if (capacity > 0 && batteryDemand > 0 && !offPeakHold) {
@@ -204,7 +209,7 @@ export function simulate(
       trace.gridExport[i] = exported;
     }
 
-    const price = importPrice(hour, tariff);
+    const price = importPrice(hour, tariff, s.rate);
     importKwh += imported;
     exportKwh += exported;
     importCost += imported * price;

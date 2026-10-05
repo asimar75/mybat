@@ -29,6 +29,8 @@ interface Encoded {
   solar: number[];
   /** Water heater, only when the dataset has one. */
   wh?: number[];
+  /** Tariff register per hour (0 unknown, 1 = T1, 2 = T2), only when known. */
+  r?: number[];
 }
 
 const KEY = 'mybat.dataset';
@@ -47,6 +49,7 @@ export function encodeDataset(d: SavedDataset): string {
     ev: d.samples.map((s) => round(s.ev)),
     solar: d.samples.map((s) => round(s.solar)),
     ...(d.samples.some((s) => s.wh !== undefined) ? { wh: d.samples.map((s) => round(s.wh ?? 0)) } : {}),
+    ...(d.samples.some((s) => s.rate) ? { r: d.samples.map((s) => s.rate ?? 0) } : {}),
   };
   return JSON.stringify(enc);
 }
@@ -58,12 +61,14 @@ export function decodeDataset(raw: string): SavedDataset | null {
     const n = e.h.length;
     if (e.house.length !== n || e.ev.length !== n || e.solar.length !== n) return null;
     if (e.wh && e.wh.length !== n) return null;
+    if (e.r && e.r.length !== n) return null;
     const samples = e.h.map((h, i) => ({
       t: e.t0 + h * HOUR_MS,
       house: e.house[i],
       ev: e.ev[i],
       solar: e.solar[i],
       ...(e.wh ? { wh: e.wh[i] } : {}),
+      ...(e.r && (e.r[i] === 1 || e.r[i] === 2) ? { rate: e.r[i] as 1 | 2 } : {}),
     }));
     return { samples, label: e.label, notes: e.notes ?? [], savedAt: e.savedAt };
   } catch {

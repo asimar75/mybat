@@ -162,3 +162,18 @@ describe('simulate trace', () => {
     expect(trace.toHouse[1]).toBeCloseTo(1);
   });
 });
+
+describe('tariff from meter registers', () => {
+  it('prices each hour by its register when enabled, falling back to the window otherwise', () => {
+    const tou: Tariff = { ...flat, useTimeOfUse: true, importPeak: 0.4, importOffPeak: 0.1, peakStartHour: 0, peakEndHour: 24 };
+    // hour 0 counted on T2 (off-peak), hour 1 unknown → window says peak
+    const data = prepare([
+      { t: base, house: 1, solar: 0, ev: 0, rate: 2 },
+      { t: base + H, house: 1, solar: 0, ev: 0 },
+    ]);
+    const spec = { ...ideal, nominalKwh: 0 };
+    expect(simulate(data, spec, { ...tou, useMeterRegisters: true, peakRegister: 1 }, opts).importCost).toBeCloseTo(0.1 + 0.4);
+    expect(simulate(data, spec, { ...tou, useMeterRegisters: true, peakRegister: 2 }, opts).importCost).toBeCloseTo(0.4 + 0.4);
+    expect(simulate(data, spec, { ...tou, useMeterRegisters: false }, opts).importCost).toBeCloseTo(0.8);
+  });
+});

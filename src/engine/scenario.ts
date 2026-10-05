@@ -24,7 +24,7 @@ export function applyScenario(samples: HourSample[], s: Scenario): HourSample[] 
   if (isNoChange(s)) return samples;
   const h = factor(s.householdPct);
   const e = factor(s.evPct);
-  return samples.map((x) => ({ t: x.t, solar: x.solar, house: x.house * h, ev: x.ev * e, wh: (x.wh ?? 0) * h }));
+  return samples.map((x) => ({ ...x, house: x.house * h, ev: x.ev * e, wh: (x.wh ?? 0) * h }));
 }
 
 /**

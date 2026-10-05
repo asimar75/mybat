@@ -294,11 +294,14 @@ function isoWithOffset(t: number): string {
 /** Hourly data in the same format the CSV import reads, so an export can be edited and re-imported. */
 export function toCsv(samples: HourSample[]): string {
   const withWh = hasWaterHeater(samples);
+  const withRate = samples.some((s) => s.rate);
   const rows = samples.map((s) => {
     const wh = s.wh ?? 0;
-    const base = `${isoWithOffset(s.t)},${(s.house + s.ev + wh).toFixed(3)},${s.solar.toFixed(3)},${s.ev.toFixed(3)}`;
-    return withWh ? `${base},${wh.toFixed(3)}` : base;
+    let row = `${isoWithOffset(s.t)},${(s.house + s.ev + wh).toFixed(3)},${s.solar.toFixed(3)},${s.ev.toFixed(3)}`;
+    if (withWh) row += `,${wh.toFixed(3)}`;
+    if (withRate) row += `,${s.rate ?? ''}`;
+    return row;
   });
-  const header = `timestamp,consumption_kwh,solar_kwh,ev_kwh${withWh ? ',water_heater_kwh' : ''}`;
+  const header = `timestamp,consumption_kwh,solar_kwh,ev_kwh${withWh ? ',water_heater_kwh' : ''}${withRate ? ',tariff_register' : ''}`;
   return [header, ...rows].join('\n') + '\n';
 }
