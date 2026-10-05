@@ -90,6 +90,27 @@ describe('parseMeterCsv on HomeWizard-style exports', () => {
     expect(ev.lastHour).toBeLessThan(grid.lastHour);
   });
 
+  it('spots outages the export spread evenly over the gap (flat solar at night)', () => {
+    // Solar with a natural wobble; on day 1, 19:00 → day 2, 12:30 the meter was offline and the catch-up
+    // came back as 0.148 kWh every quarter, like HomeWizard's export of a Panels meter.
+    let seed = 1;
+    const wobble = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 0.05;
+    const gapFrom = new Date(2025, 10, 4, 19).getTime();
+    const gapTo = new Date(2025, 10, 5, 12, 30).getTime();
+    const csv = meterFile('time,Import kWh,Export kWh', 3, (d) => {
+      if (d.getTime() >= gapFrom && d.getTime() <= gapTo) return [0, 0.148];
+      return [0, d.getHours() >= 9 && d.getHours() < 17 ? 0.6 + wobble() : 0];
+    }, [0, 100]);
+    const m = parseMeterCsv('Panels.csv', csv);
+    expect(m.evenFills).toEqual([{ from: gapFrom, to: gapTo }]);
+    const flat = combineMeters([{ meter: m, role: 'solar' }, { meter: grid, role: 'grid' }], true);
+    expect(flat.notes.join(' ')).toContain('Panels.csv: the meter was probably offline 04/Nov/2025 19:00 – 05/Nov/2025 12:45');
+    // A steady load that wobbles by more than a few watts is real, not a filled gap; nor is a steady standby.
+    expect(parseMeterCsv('Solar.csv', meterFile('time,Import kWh,Export kWh', 1, () => [0, 0.6 + wobble()], [0, 100])).evenFills).toEqual([]);
+    const standby = meterFile('time,Import kWh,Export kWh', 1, (d) => [d.getMinutes() === 15 ? 0.013 : 0.012, 0], [100, 0]);
+    expect(parseMeterCsv('Heating.csv', standby).evenFills).toEqual([]);
+  });
+
   it('parses local date formats', () => {
     expect(parseLocalTime('2025-11-03 07:15')).toBe(new Date(2025, 10, 3, 7, 15).getTime());
     expect(parseLocalTime('3-11-2025 7:15')).toBe(new Date(2025, 10, 3, 7, 15).getTime());
@@ -131,7 +152,7 @@ describe('combineMeters', () => {
   it('trims to the common period, or zero-fills a short EV file with a note', () => {
     const common = combineMeters(assigned, true);
     expect(common.samples.length).toBeLessThan(48);
-    expect(common.notes.join(' ')).toMatch(/EV\.csv is shorter/);
+    expect(common.notes.join(' ')).toMatch(/EV\.csv has no readings after .*untick “Only use the period every file covers”/);
     const all = combineMeters(assigned, false);
     expect(all.notes.join(' ')).toMatch(/no EV or water-heater data/);
   });
