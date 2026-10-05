@@ -170,7 +170,8 @@
             <div class="scroll"><table class="meter-table"><thead><tr>
               <th>File</th><th>Contents</th><th>Period</th><th>Import / export kWh</th><th>What is it?</th>
             </tr></thead><tbody id="meter-rows"></tbody></table></div>
-            <label class="check"><input id="meter-common" type="checkbox" checked /> Only use the period every file covers</label>
+            <label class="check"><input id="meter-common" type="checkbox" checked /> Only use the period the grid and solar files both cover</label>
+            <p class="hint" style="margin:0">A shorter EV or water-heater file never cuts the period: its missing hours count as 0.</p>
             <div class="actions"><button id="meter-load" class="primary" type="button">Load these files</button></div>
           </div>
         </div>

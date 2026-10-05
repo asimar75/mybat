@@ -353,6 +353,13 @@ export function parseMeterCsv(name: string, text: string): ParsedMeter {
   };
 }
 
+/** "starts 01/Oct/2025 and has no readings after 20/Aug/2026" relative to the period used. */
+function coverage(m: ParsedMeter, start: number, end: number): string {
+  return [m.firstHour > start ? `starts ${fmtDate(m.firstHour)}` : '', m.lastHour < end ? `has no readings after ${fmtDate(m.lastHour)}` : '']
+    .filter(Boolean)
+    .join(' and ');
+}
+
 /** "30/Oct/2025 19:00 – 31/Oct/2025 12:45" for an outage. */
 function fmtSpan(from: number, to: number): string {
   const time = (t: number) => {
@@ -411,29 +418,28 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
 
   let start = Math.min(...primary.map((m) => m.firstHour));
   let end = Math.max(...primary.map((m) => m.lastHour));
+  // Only the meters that make up total use set the period. A shorter EV or water-heater file doesn't
+  // cut it: its missing hours count as 0, which only moves that use into household load.
   if (commonPeriodOnly) {
-    const s = Math.max(...used.map((m) => m.firstHour));
-    const e = Math.min(...used.map((m) => m.lastHour));
-    if (e <= s) throw new Error('The files do not overlap in time.');
+    const s = Math.max(...primary.map((m) => m.firstHour));
+    const e = Math.min(...primary.map((m) => m.lastHour));
+    if (e <= s) throw new Error('The grid, consumption and solar files do not overlap in time.');
     if (s > start || e < end) {
-      const short = used
-        .filter((m) => m.lastHour < end || m.firstHour > start)
-        .map((m) => {
-          const range = [m.firstHour > start ? `starts ${fmtDate(m.firstHour)}` : '', m.lastHour < end ? `has no readings after ${fmtDate(m.lastHour)}` : '']
-            .filter(Boolean)
-            .join(' and ');
-          return `${m.name} ${range}`;
-        });
-      const onlySplit = used.filter((m) => m.lastHour < end || m.firstHour > start).every((m) => ev.includes(m) || wh.includes(m));
+      const short = primary.filter((m) => m.lastHour < end || m.firstHour > start).map((m) => `${m.name} ${coverage(m, start, end)}`);
       notes.push(
-        `Using ${fmtDate(s)} – ${fmtDate(e)}, the period every file covers: ${short.join('; ')}. ` +
-          (onlySplit
-            ? `To use the full ${fmtDate(start)} – ${fmtDate(end)}, untick “Only use the period every file covers”; the missing EV or water-heater hours then count as household use (total use stays right).`
-            : 'Download every meter for the same period to use more of the data.'),
+        `Using ${fmtDate(s)} – ${fmtDate(e)}, the period the grid${consumption.length ? ', consumption' : ''}${solar.length ? ' and solar' : ''} files all cover: ${short.join('; ')}. ` +
+          'Download those meters for the same period to use more of the data.',
       );
     }
     start = s;
     end = e;
+  }
+  for (const m of [...ev, ...wh]) {
+    if (m.lastHour >= end && m.firstHour <= start) continue;
+    notes.push(
+      `${m.name} ${coverage(m, start, end)}; the hours without readings count as 0 ${ev.includes(m) ? 'EV charging' : 'water-heater use'} ` +
+        '(right if it was switched off; otherwise that use shows up as household load). Total use is unaffected.',
+    );
   }
 
   // Solar meters count production in whichever direction dominates (usually "export").
@@ -529,7 +535,13 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     }
   }
   if (missing) notes.push(`${missing.toLocaleString()} hours skipped because a grid, consumption or solar file had no data.`);
-  if (filledZero) notes.push(`${filledZero.toLocaleString()} hours had no EV or water-heater data; counted as 0, so that use stays in household load.`);
+  // Hours before or after a short EV / water-heater file are explained above; report only gaps inside one.
+  const edgeHours = [...ev, ...wh].reduce(
+    (a, m) => a + Math.max(0, (Math.min(m.firstHour, end + HOUR_MS) - start) / HOUR_MS) + Math.max(0, (end - Math.max(m.lastHour, start - HOUR_MS)) / HOUR_MS),
+    0,
+  );
+  const innerGaps = filledZero - Math.round(edgeHours);
+  if (innerGaps > 0) notes.push(`${innerGaps.toLocaleString()} hours had no EV or water-heater data; counted as 0, so that use stays in household load.`);
   if (clamped) {
     // A handful of hours is normal: separate meters don't tick at exactly the same moment.
     notes.push(
