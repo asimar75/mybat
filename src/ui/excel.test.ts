@@ -52,7 +52,7 @@ describe('Excel export', () => {
     const sheets = buildSheets({ ...base, reimbursement: r });
     expect(JSON.stringify(sheets[0].data)).toContain('EV reimbursement per year');
     expect(JSON.stringify(sheets[2].data[0])).toContain('EV reimbursement price');
-    const july = sheets[2].data.find((row) => JSON.stringify(row).includes('2025-07'))!;
+    const july = sheets[2].data.find((row) => JSON.stringify(row).includes('Jul/2025'))!;
     expect(JSON.stringify(july)).toContain('"value":0.3');
   });
 });

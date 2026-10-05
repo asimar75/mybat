@@ -1,5 +1,6 @@
 import type { HourSample } from '../engine/types';
 import { HOUR_MS } from './derive';
+import { fmtDate } from '../ui/format';
 
 /**
  * Import of per-meter CSV exports from monitoring apps: one file per meter (grid connection,
@@ -374,7 +375,7 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     if (s > start || e < end) {
       const short = used.filter((m) => m.lastHour < end || m.firstHour > start).map((m) => m.name);
       notes.push(
-        `Using ${new Date(s).toLocaleDateString()} – ${new Date(e).toLocaleDateString()}, the period every file covers (${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} shorter).`,
+        `Using ${fmtDate(s)} – ${fmtDate(e)}, the period every file covers (${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} shorter).`,
       );
     }
     start = s;

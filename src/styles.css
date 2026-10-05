@@ -669,3 +669,43 @@ tr.short td:last-child {
 .meter-table select {
   min-width: 190px;
 }
+
+.date-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.date-step input {
+  width: auto;
+}
+.link-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.date-field {
+  position: relative;
+  display: inline-flex;
+}
+.date-native {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.date-display {
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.date-display:hover {
+  border-color: var(--accent);
+}
