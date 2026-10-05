@@ -172,6 +172,14 @@ describe('helpers', () => {
     expect(discounted.residualValue).toBeCloseTo(0.7 * 5500 * 0.5 * 1.03 ** -30);
     const oneYear = lifecycle({ ...row, annual: { cycles: 0 } as never }, rows, { ...econ, calendarLossPerYear: 0, horizonYears: 1, discountRate: 0.05 });
     expect(oneYear.lifetimeSavings).toBeCloseTo(700 / 1.05); // a full year's saving, received at the year's end
+    // Discounted payback: 5,500 against ~690/yr fading savings, slower once discounted, and it may
+    // run past the horizon (simple payback isn't capped by it either).
+    expect(over30.discountedPaybackYears).toBeGreaterThan(5500 / 700);
+    expect(discounted.discountedPaybackYears).toBeGreaterThan(over30.discountedPaybackYears);
+    expect(lifecycle(row, rows, { ...econ, horizonYears: 5 }).discountedPaybackYears).toBeCloseTo(over30.discountedPaybackYears, 6);
+    const flat = lifecycle({ ...row, annual: { cycles: 0 } as never }, rows, { ...econ, calendarLossPerYear: 0, horizonYears: 20 });
+    expect(flat.discountedPaybackYears).toBeCloseTo(5500 / 700); // no fading, no discount = simple payback
+    expect(lifecycle(row, [{ nominalKwh: 0, annualSavings: 0 }, { nominalKwh: 10, annualSavings: 10 }], econ).discountedPaybackYears).toBe(Infinity);
     const over10 = lifecycle(row, rows, { ...econ, horizonYears: 10 });
     expect(over10.replacements).toBe(0);
     expect(over10.residualValue).toBeCloseTo(5500 * (1 - 10 / 12));

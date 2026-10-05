@@ -672,9 +672,13 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
         <p class="eyebrow">Best value</p>
         <p class="hero">${best.nominalKwh} kWh</p>
         <p>${num1(best.usableKwh)} kWh usable, ${num1(best.powerKw)} kW. Costs ${money(best.investment, currency)},
-        saves ${money(best.annualSavings, currency)} in year one, pays back in ${years(best.paybackYears)}, and leaves you
+        saves ${money(best.annualSavings, currency)} in year one, pays back in ${years(best.paybackYears)}${discountedPayback(best)}, and leaves you
         <b>${money(best.netBenefit, currency)}</b> ahead over ${lifetime} years${discountNote()}.</p>
         <p>${lifespan(best, currency, lifetime)}</p>
+        ${best.discountedPaybackYears > best.lifeYears
+          ? `<p><b>Caution:</b> the discounted payback (${years(best.discountedPaybackYears)}) is longer than the battery lasts (${years(best.lifeYears)}).
+             The first battery doesn't earn its cost back; the positive net benefit relies on the value counted for the life left at the end.</p>`
+          : ''}
         <p>Self-sufficiency goes from ${pct(base.selfSufficiency)} to ${pct(best.annual.selfSufficiency)}.</p>
       </div>`;
   }
@@ -694,6 +698,12 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
 function discountNote(): string {
   const rate = lastCfg?.economics.discountRate ?? 0;
   return rate ? `, in today's money (${+(rate * 100).toFixed(1)} % discount rate)` : '';
+}
+
+/** " (11.2 yrs discounted)" — the payback once fading savings and the discount rate are counted. */
+function discountedPayback(r: SweepRow): string {
+  if (!lastCfg?.economics.discountRate) return '';
+  return Number.isFinite(r.discountedPaybackYears) ? ` (${years(r.discountedPaybackYears)} discounted)` : ' (never, discounted)';
 }
 
 const lasts = (r: SweepRow) => (Number.isFinite(r.lifeYears) ? years(r.lifeYears) : 'indefinitely');
@@ -767,7 +777,8 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
       return `<tr${cls}>
         <td>${r.nominalKwh}</td><td>${num1(r.usableKwh)}</td><td>${num1(r.powerKw)}</td>
         <td>${money(r.investment, currency)}</td><td>${money(r.annualSavings, currency)}</td>
-        <td>${r.nominalKwh ? years(r.paybackYears) : '–'}</td><td>${r.nominalKwh ? money(r.netBenefit, currency) : '–'}</td>
+        <td>${r.nominalKwh ? years(r.paybackYears) : '–'}</td><td>${r.nominalKwh ? years(r.discountedPaybackYears) : '–'}</td>
+        <td>${r.nominalKwh ? money(r.netBenefit, currency) : '–'}</td>
         <td>${pct(r.annual.selfSufficiency)}</td><td>${kwh(r.annual.importKwh)}</td>
         <td>${num1(r.annual.cycles)}</td>
         <td>${r.nominalKwh ? lasts(r) : '–'}</td><td>${r.nominalKwh ? r.replacements : '–'}</td>
@@ -781,7 +792,7 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
         <table>
           <thead><tr>
             <th>Size kWh</th><th>Usable</th><th>Power kW</th><th>Cost</th><th>Saving / yr</th>
-            <th>Payback</th><th>Net benefit</th><th>Self-suff.</th><th>Grid import / yr</th><th>Cycles / yr</th>
+            <th>Payback</th><th title="Discounted savings, fading with the battery, repay purchase and replacements">Disc. payback</th><th>Net benefit</th><th>Self-suff.</th><th>Grid import / yr</th><th>Cycles / yr</th>
             <th>Lasts</th><th>Replacements</th><th>Value left</th>
           </tr></thead>
           <tbody>${rows}</tbody>

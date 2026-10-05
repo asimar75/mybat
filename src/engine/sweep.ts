@@ -25,6 +25,11 @@ export interface SweepRow {
   netBenefit: number;
   /** Simple payback in years; Infinity when savings ≤ 0. */
   paybackYears: number;
+  /**
+   * Years until discounted savings (fading with the battery) repay the purchase plus any replacement
+   * bought before that; Infinity if never. Ignores the leftover value, unlike the net benefit.
+   */
+  discountedPaybackYears: number;
 }
 
 export interface Recommendation {
@@ -70,6 +75,9 @@ function scale(r: SimResult, f: number): SimResult {
   };
 }
 
+/** How far ahead discounted payback is searched before it counts as never. */
+const PAYBACK_SEARCH_YEARS = 60;
+
 /** Capacity left when a home battery counts as worn out (the usual warranty threshold). */
 export const END_OF_LIFE = 0.7;
 
@@ -101,30 +109,48 @@ export function lifecycle(
   row: { nominalKwh: number; investment: number; annual: SimResult },
   rows: { nominalKwh: number; annualSavings: number }[],
   economics: Economics,
-): Pick<SweepRow, 'fadePerYear' | 'lifeYears' | 'replacements' | 'replacementCost' | 'residualValue' | 'lifetimeSavings'> {
+): Pick<SweepRow, 'fadePerYear' | 'lifeYears' | 'replacements' | 'replacementCost' | 'residualValue' | 'lifetimeSavings' | 'discountedPaybackYears'> {
   const fade = fadePerYear(row.annual.cycles, economics);
   const lifeYears = fade > 0 ? (1 - END_OF_LIFE) / fade : Infinity;
-  if (row.nominalKwh === 0) return { fadePerYear: 0, lifeYears: Infinity, replacements: 0, replacementCost: 0, residualValue: 0, lifetimeSavings: 0 };
+  if (row.nominalKwh === 0) {
+    return { fadePerYear: 0, lifeYears: Infinity, replacements: 0, replacementCost: 0, residualValue: 0, lifetimeSavings: 0, discountedPaybackYears: Infinity };
+  }
+  const horizon = Math.floor(economics.horizonYears);
   const presentValue = (amount: number, years: number) => amount * Math.pow(1 + economics.discountRate, -years);
   let age = 0;
   let lastPrice = row.investment;
   let replacements = 0;
   let replacementCost = 0;
   let lifetimeSavings = 0;
-  for (let y = 0; y < Math.floor(economics.horizonYears); y++) {
+  let residualValue = 0;
+  // Discounted payback keeps counting past the horizon (up to PAYBACK_SEARCH_YEARS), like simple payback.
+  let stillOwed = row.investment;
+  let discountedPaybackYears = Infinity;
+  for (let y = 0; y < Math.max(horizon, PAYBACK_SEARCH_YEARS) && (y < horizon || discountedPaybackYears === Infinity); y++) {
     if (age >= lifeYears - 1e-9) {
-      replacements++;
       lastPrice = row.investment * economics.replacementFraction;
-      replacementCost += presentValue(lastPrice, y);
+      const cost = presentValue(lastPrice, y);
+      if (y < horizon) {
+        replacements++;
+        replacementCost += cost;
+      }
+      stillOwed += cost;
       age = 0;
     }
     const capacity = Math.max(END_OF_LIFE, 1 - fade * (age + 0.5));
-    lifetimeSavings += presentValue(savingsAt(rows, row.nominalKwh * capacity), y + 1);
+    const saving = presentValue(savingsAt(rows, row.nominalKwh * capacity), y + 1);
+    if (y < horizon) lifetimeSavings += saving;
+    if (discountedPaybackYears === Infinity && saving > 0) {
+      if (saving >= stillOwed) discountedPaybackYears = y + Math.max(0, stillOwed) / saving;
+      stillOwed -= saving;
+    }
     age++;
+    if (y === horizon - 1) {
+      const leftover = Number.isFinite(lifeYears) ? lastPrice * Math.max(0, 1 - age / lifeYears) : lastPrice;
+      residualValue = presentValue(leftover, horizon);
+    }
   }
-  const leftover = Number.isFinite(lifeYears) ? lastPrice * Math.max(0, 1 - age / lifeYears) : lastPrice;
-  const residualValue = presentValue(leftover, Math.floor(economics.horizonYears));
-  return { fadePerYear: fade, lifeYears, replacements, replacementCost, residualValue, lifetimeSavings };
+  return { fadePerYear: fade, lifeYears, replacements, replacementCost, residualValue, lifetimeSavings, discountedPaybackYears };
 }
 
 export function sweep(

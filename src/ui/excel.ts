@@ -65,6 +65,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
       [text(`Investment (${focus.nominalKwh} kWh)`), num(focus.investment, money)],
       [text('Saving in year one'), num(focus.annualSavings, money)],
       [text('Simple payback (years)'), num(focus.paybackYears)],
+      [text('Discounted payback (years)'), num(focus.discountedPaybackYears)],
       [text(`Net benefit over ${economics.horizonYears} years${economics.discountRate ? ", today's money" : ''}`), num(focus.netBenefit, money)],
       [text('Cycles per year'), num(focus.annual.cycles, '0')],
       [text('Battery life until 70 % capacity (years)'), num(focus.lifeYears)],
@@ -135,7 +136,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   // ---- All sizes ----
   const sizes: Cell[][] = [
-    header(['Size kWh', 'Usable kWh', 'Power kW', 'Cost', 'Saving / yr', 'Payback yrs', 'Net benefit', 'Self-sufficiency', 'Grid import kWh/yr', 'Grid export kWh/yr', 'Cycles / yr', 'Days full', 'Days empty', 'Lasts (years)', 'Replacements', 'Replacement cost', 'Value left at end']),
+    header(['Size kWh', 'Usable kWh', 'Power kW', 'Cost', 'Saving / yr', 'Payback yrs', 'Discounted payback yrs', 'Net benefit', 'Self-sufficiency', 'Grid import kWh/yr', 'Grid export kWh/yr', 'Cycles / yr', 'Days full', 'Days empty', 'Lasts (years)', 'Replacements', 'Replacement cost', 'Value left at end']),
     ...rec.rows.map((r) => [
       num(r.nominalKwh),
       num(r.usableKwh),
@@ -143,6 +144,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
       num(r.investment, money),
       num(r.annualSavings, money),
       r.nominalKwh ? num(r.paybackYears) : text('—'),
+      r.nominalKwh ? num(r.discountedPaybackYears) : text('—'),
       r.nominalKwh ? num(r.netBenefit, money) : text('—'),
       num(r.annual.selfSufficiency, pct),
       num(r.annual.importKwh, '#,##0'),
@@ -198,7 +200,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   return [
     { sheet: 'Summary', data: summary, columns: [{ width: 42 }, { width: 48 }] },
-    { sheet: 'All sizes', data: sizes, columns: new Array(17).fill({ width: 15 }), stickyRowsCount: 1 },
+    { sheet: 'All sizes', data: sizes, columns: new Array(18).fill({ width: 15 }), stickyRowsCount: 1 },
     { sheet: 'Monthly', data: monthly, columns: [{ width: 10 }, ...new Array(11).fill({ width: 20 })], stickyRowsCount: 1 },
     { sheet: 'Hourly data', data: hourly, columns: [{ width: 18 }, ...new Array(4).fill({ width: 16 })], stickyRowsCount: 1 },
   ] as Sheet<Blob>[];
