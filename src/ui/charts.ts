@@ -86,8 +86,9 @@ export function renderCharts(rec: Recommendation, highlight: SweepRow | null, cu
     data: {
       labels: sizes,
       datasets: [
-        line('Lifetime savings', rec.rows.map((r) => r.lifetimeSavings), t.series1),
-        line('Battery cost', rec.rows.map((r) => r.investment), t.series2, true),
+        line('Savings over the period', rec.rows.map((r) => r.lifetimeSavings), t.series1),
+        // Purchase + replacements − value left at the end: what the battery really costs over the period.
+        line('Battery cost incl. replacements', rec.rows.map((r) => r.investment + r.replacementCost - r.residualValue), t.series2, true),
       ],
     },
     options: {

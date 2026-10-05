@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTrace, prepare, simulate, isPeakHour } from './simulate';
-import { lifetimeMultiplier, sizeRange, sweep } from './sweep';
+import { END_OF_LIFE, fadePerYear, lifecycle, sizeRange, sweep } from './sweep';
 import type { BatterySpec, HourSample, SimOptions, Tariff } from './types';
 import { demoYear } from '../data/demo';
 
@@ -100,9 +100,10 @@ describe('tariff windows', () => {
   });
 });
 
+const econ = { costPerKwh: 400, fixedCost: 1500, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7 };
+
 describe('sweep', () => {
   const template = { usableFraction: 0.95, inverterKw: 5, cRate: 0.5, roundTripEfficiency: 0.9 };
-  const econ = { costPerKwh: 400, fixedCost: 1500, lifetimeYears: 12, degradationPerYear: 0.02 };
 
   it('has diminishing returns and picks a size inside the range', () => {
     const data = prepare(demoYear(2024));
@@ -124,6 +125,17 @@ describe('sweep', () => {
     expect(rec.best).toBeNull();
   });
 
+  it('lets a bigger battery cycle less and last longer', () => {
+    const rec = sweep(prepare(demoYear(2024)), template, sizeRange(20, 2), { ...flat, exportPrice: 0.05 }, opts, econ);
+    const sized = rec.rows.filter((r) => r.nominalKwh > 0);
+    for (let i = 1; i < sized.length; i++) {
+      expect(sized[i].annual.cycles).toBeLessThanOrEqual(sized[i - 1].annual.cycles + 1e-6);
+      expect(sized[i].lifeYears).toBeGreaterThanOrEqual(sized[i - 1].lifeYears - 1e-6);
+    }
+    expect(sized[sized.length - 1].lifeYears).toBeLessThanOrEqual(30); // 1 %/year ageing caps it at 30 years
+    for (const r of sized) expect(r.netBenefit).toBeCloseTo(r.lifetimeSavings - r.investment - r.replacementCost + r.residualValue, 6);
+  });
+
   it('always includes a zero-size baseline', () => {
     const rec = sweep(prepare(hours([[1, 2]])), template, [5, 10], flat, opts, econ);
     expect(rec.rows[0].nominalKwh).toBe(0);
@@ -132,9 +144,30 @@ describe('sweep', () => {
 });
 
 describe('helpers', () => {
-  it('lifetimeMultiplier sums degraded years', () => {
-    expect(lifetimeMultiplier(3, 0)).toBe(3);
-    expect(lifetimeMultiplier(2, 0.1)).toBeCloseTo(1.9);
+  it('wears a battery by age plus cycles', () => {
+    // 1 %/year ageing + 300 cycles of a 6,000-cycle (to 70 %) rating = 2.5 %/year → 12 years to 70 %.
+    expect(fadePerYear(300, econ)).toBeCloseTo(0.025);
+    expect(END_OF_LIFE).toBe(0.7);
+  });
+
+  it('replaces worn batteries within the horizon and credits the life left', () => {
+    const rows = [
+      { nominalKwh: 0, annualSavings: 0 },
+      { nominalKwh: 5, annualSavings: 500 },
+      { nominalKwh: 10, annualSavings: 700 },
+    ];
+    const row = { nominalKwh: 10, investment: 5500, annual: { cycles: 300 } as never };
+    const over30 = lifecycle(row, rows, { ...econ, horizonYears: 30 });
+    expect(over30.lifeYears).toBeCloseTo(12);
+    expect(over30.replacements).toBe(2); // in years 12 and 24
+    expect(over30.replacementCost).toBeCloseTo(2 * 0.7 * 5500);
+    expect(over30.residualValue).toBeCloseTo(0.7 * 5500 * 0.5); // 6 of 12 years left
+    // A worn 10 kWh battery saves what a smaller new one would: between the 5 and 10 kWh savings.
+    expect(over30.lifetimeSavings).toBeLessThan(30 * 700);
+    expect(over30.lifetimeSavings).toBeGreaterThan(30 * 600);
+    const over10 = lifecycle(row, rows, { ...econ, horizonYears: 10 });
+    expect(over10.replacements).toBe(0);
+    expect(over10.residualValue).toBeCloseTo(5500 * (1 - 10 / 12));
   });
   it('sizeRange starts at zero', () => {
     expect(sizeRange(3, 1)).toEqual([0, 1, 2, 3]);

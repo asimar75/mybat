@@ -65,7 +65,12 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
       [text(`Investment (${focus.nominalKwh} kWh)`), num(focus.investment, money)],
       [text('Saving in year one'), num(focus.annualSavings, money)],
       [text('Simple payback (years)'), num(focus.paybackYears)],
-      [text(`Net benefit over ${economics.lifetimeYears} years`), num(focus.netBenefit, money)],
+      [text(`Net benefit over ${economics.horizonYears} years`), num(focus.netBenefit, money)],
+      [text('Cycles per year'), num(focus.annual.cycles, '0')],
+      [text('Battery life until 70 % capacity (years)'), num(focus.lifeYears)],
+      [text(`Replacements within ${economics.horizonYears} years`), num(focus.replacements, '0')],
+      [text('Replacement cost'), num(focus.replacementCost, money)],
+      [text('Value of life left at the end'), num(focus.residualValue, money)],
       [text('Self-sufficiency without → with battery'), text(`${Math.round(base.selfSufficiency * 100)} % → ${Math.round(focus.annual.selfSufficiency * 100)} %`)],
     );
   }
@@ -116,8 +121,10 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
     [text('Round-trip efficiency'), num(template.roundTripEfficiency, pct)],
     [text('Inverter max power (kW)'), num(template.inverterKw)],
     [text('C-rate'), num(template.cRate, '0.00')],
-    [text('Lifetime (years)'), num(economics.lifetimeYears, '0')],
-    [text('Capacity loss per year'), num(economics.degradationPerYear, '0.0%')],
+    [text('Compared over (years)'), num(economics.horizonYears, '0')],
+    [text('Rated cycles to 70 % capacity'), num(economics.cycleLife, '#,##0')],
+    [text('Capacity loss per year from age'), num(economics.calendarLossPerYear, '0.00%')],
+    [text("Replacement price, share of today's"), num(economics.replacementFraction, pct)],
     [],
     [bold('Strategy')],
     [text('EV charger'), text(options.evMode === 'include' ? 'Battery may charge the car' : 'Battery never charges the car')],
@@ -127,7 +134,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   // ---- All sizes ----
   const sizes: Cell[][] = [
-    header(['Size kWh', 'Usable kWh', 'Power kW', 'Cost', 'Saving / yr', 'Payback yrs', 'Net benefit', 'Self-sufficiency', 'Grid import kWh/yr', 'Grid export kWh/yr', 'Cycles / yr', 'Days full', 'Days empty']),
+    header(['Size kWh', 'Usable kWh', 'Power kW', 'Cost', 'Saving / yr', 'Payback yrs', 'Net benefit', 'Self-sufficiency', 'Grid import kWh/yr', 'Grid export kWh/yr', 'Cycles / yr', 'Days full', 'Days empty', 'Lasts (years)', 'Replacements', 'Replacement cost', 'Value left at end']),
     ...rec.rows.map((r) => [
       num(r.nominalKwh),
       num(r.usableKwh),
@@ -142,6 +149,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
       num(r.annual.cycles, '0'),
       num(r.annual.days ? r.annual.daysFull / r.annual.days : 0, pct),
       num(r.annual.days ? r.annual.daysEmpty / r.annual.days : 0, pct),
+      ...(r.nominalKwh ? [num(r.lifeYears), num(r.replacements, '0'), num(r.replacementCost, money), num(r.residualValue, money)] : [text('—'), text('—'), text('—'), text('—')]),
     ]),
   ];
 
@@ -189,7 +197,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   return [
     { sheet: 'Summary', data: summary, columns: [{ width: 42 }, { width: 48 }] },
-    { sheet: 'All sizes', data: sizes, columns: new Array(13).fill({ width: 15 }), stickyRowsCount: 1 },
+    { sheet: 'All sizes', data: sizes, columns: new Array(17).fill({ width: 15 }), stickyRowsCount: 1 },
     { sheet: 'Monthly', data: monthly, columns: [{ width: 10 }, ...new Array(11).fill({ width: 20 })], stickyRowsCount: 1 },
     { sheet: 'Hourly data', data: hourly, columns: [{ width: 18 }, ...new Array(4).fill({ width: 16 })], stickyRowsCount: 1 },
   ] as Sheet<Blob>[];

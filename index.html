@@ -43,8 +43,16 @@
             <label>Round-trip efficiency % <input name="efficiencyPct" type="number" min="50" max="100" value="90" /></label>
             <label>Inverter max power (kW) <input name="inverterKw" type="number" step="0.5" min="0.5" value="5" /></label>
             <label>Max power per usable kWh (C-rate) <input name="cRate" type="number" step="0.1" min="0.1" value="0.5" /></label>
-            <label>Lifetime (years) <input name="lifetimeYears" type="number" min="1" max="30" value="12" /></label>
-            <label>Capacity loss per year % <input name="degradationPct" type="number" step="0.5" min="0" max="10" value="2" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Lifespan &amp; replacement</legend>
+            <label>Compare over
+              <select name="horizonYears"><option value="10">10 years</option><option value="20" selected>20 years</option><option value="30">30 years</option><option value="40">40 years</option></select>
+            </label>
+            <label>Rated cycles (to 70 % capacity) <input name="cycleLife" type="number" step="500" min="500" value="6000" /></label>
+            <label>Capacity loss per year from age % <input name="calendarLossPct" type="number" step="0.25" min="0" max="10" value="1" /></label>
+            <label>Replacement price, % of today's <input name="replacementPct" type="number" step="5" min="0" max="200" value="70" /></label>
+            <p class="hint" style="margin:0">Wear = age + cycling. A battery is replaced at 70 % capacity; a bigger one cycles less, so it lasts longer. LFP cells are typically rated 6,000+ cycles.</p>
           </fieldset>
           <fieldset>
             <legend>EV reimbursement</legend>
