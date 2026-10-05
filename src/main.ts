@@ -11,7 +11,7 @@ import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
 import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, twelveMonthsFrom, yearStarts, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, loadDataset, saveDataset } from './data/persist';
-import { renderBatteryCharts, renderCharts, renderDataCharts } from './ui/charts';
+import { renderBatteryCharts, renderCharts, renderDataCharts, renderMonthlyChart } from './ui/charts';
 import { exportExcel } from './ui/excel';
 import { dateRange, escapeHtml, fmtDate, fmtDateTime, fmtMonth, fmtTime, kwh, money, num1, pct, years } from './ui/format';
 
@@ -814,13 +814,9 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
         <figcaption>Self-sufficiency<small>Share of your consumption not bought from the grid</small></figcaption>
         <div class="chart-box"><canvas id="chart-selfsufficiency" role="img" aria-label="Self-sufficiency by battery size"></canvas></div>
       </figure>
-      <figure class="wide">
-        <figcaption>Grid import per month<small>Winter is where batteries struggle: there's little surplus solar to store</small></figcaption>
-        <div class="chart-box"><canvas id="chart-monthly" role="img" aria-label="Monthly grid import with and without battery"></canvas></div>
-      </figure>
     </div>
-    <h3>Hour by hour with a battery</h3>
-    <p class="hint">What the simulated battery does each hour. Opens on a recent sunny spell; pick a winter week to see where batteries struggle.</p>
+    <h3>Simulate a battery size</h3>
+    <p class="hint">The size you pick drives the monthly import and the hour-by-hour charts below. The hour-by-hour view opens on a recent sunny spell; pick a winter week to see where batteries struggle.</p>
     <div class="sim-controls">
       <label>Battery size
         <select id="sim-size">${rec.rows
@@ -847,6 +843,11 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
     </div>
     <div class="charts">
       <figure class="wide">
+        <figcaption>Grid import per month<small>Winter is where batteries struggle: there's little surplus solar to store. Tick sizes to compare (up to ${MAX_COMPARE}).</small></figcaption>
+        <div id="month-sizes" class="size-chips" role="group" aria-label="Battery sizes to compare"></div>
+        <div class="chart-box"><canvas id="chart-monthly" role="img" aria-label="Monthly grid import without and with the selected battery"></canvas></div>
+      </figure>
+      <figure class="wide">
         <figcaption>Energy stored in the battery<small>Usable capacity at the top of the scale</small></figcaption>
         <div class="chart-box short"><canvas id="chart-soc" role="img" aria-label="Battery state of charge per hour"></canvas></div>
       </figure>
@@ -861,7 +862,7 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
       <button id="xlsx-export" class="primary" type="button">Download results (Excel)</button>
       <span class="hint" style="margin:0">Summary, all sizes, monthly totals and the hourly data, in one .xlsx file.</span>
     </div>`;
-  renderCharts(rec, focus, currency);
+  renderCharts(rec, currency);
   renderBatterySim(rec);
   renderLive(rec, currency, lifetime);
 }
@@ -912,12 +913,61 @@ function sunnySpellStart(days: number): string {
   return localDay(Math.max(start.getTime(), new Date(`${daily[0].day}T12:00`).getTime()));
 }
 
-function renderBatterySim(rec: Recommendation) {
-  if (!simData || !lastCfg) return;
+/** Extra sizes ticked for the monthly chart, next to the simulated one; remembered on this device. */
+const COMPARE_KEY = 'mybat.compareSizes';
+const MAX_COMPARE = 5;
+const compareSizes = new Set<number>(
+  (() => {
+    try {
+      const v = JSON.parse(storage.get(COMPARE_KEY) ?? '[]');
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'number') : [];
+    } catch {
+      return [];
+    }
+  })(),
+);
+
+/** Monthly chart: the simulated size plus the ticked ones, smallest first, with the size chips. */
+function renderMonthly(rec: Recommendation) {
+  const size = chosenSize(rec);
+  const sized = rec.rows.filter((r) => r.nominalKwh > 0);
+  const shown = sized.filter((r) => r.nominalKwh === size || compareSizes.has(r.nominalKwh)).slice(0, MAX_COMPARE);
+  if (size !== null && !shown.some((r) => r.nominalKwh === size)) shown.splice(MAX_COMPARE - 1, 1, sized.find((r) => r.nominalKwh === size)!);
+  shown.sort((a, b) => a.nominalKwh - b.nominalKwh);
+  const full = shown.length >= MAX_COMPARE;
+  $('#month-sizes').innerHTML = sized
+    .map((r) => {
+      const on = shown.includes(r);
+      const fixed = r.nominalKwh === size;
+      return `<button type="button" class="size-chip" data-compare="${r.nominalKwh}" aria-pressed="${on}"${fixed || (!on && full) ? ' disabled' : ''}
+        ${fixed ? 'title="Simulated size, picked under Battery size"' : ''}>${r.nominalKwh}</button>`;
+    })
+    .join('');
+  renderMonthlyChart(rec, shown);
+}
+
+$('#results-body').addEventListener('click', (e) => {
+  const chip = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-compare]');
+  if (!chip || !lastRec) return;
+  const kwh = Number(chip.dataset.compare);
+  if (compareSizes.has(kwh)) compareSizes.delete(kwh);
+  else compareSizes.add(kwh);
+  storage.set(COMPARE_KEY, JSON.stringify([...compareSizes]));
+  renderMonthly(lastRec);
+});
+
+/** The size shown in the battery simulation: the user's pick, else the recommendation. */
+function chosenSize(rec: Recommendation): number | null {
   const sizes = rec.rows.filter((r) => r.nominalKwh > 0).map((r) => r.nominalKwh);
-  if (sizes.length === 0) return;
+  if (sizes.length === 0) return null;
   const fallback = rec.best?.nominalKwh ?? rec.knee?.nominalKwh ?? sizes[Math.min(4, sizes.length - 1)];
-  const size = simSizeChoice !== null && sizes.includes(simSizeChoice) ? simSizeChoice : fallback;
+  return simSizeChoice !== null && sizes.includes(simSizeChoice) ? simSizeChoice : fallback;
+}
+
+function renderBatterySim(rec: Recommendation) {
+  const size = chosenSize(rec);
+  renderMonthly(rec);
+  if (!simData || !lastCfg || size === null) return;
   const samples = simData.samples;
   const first = localDay(samples[0].t);
   const last = localDay(samples[samples.length - 1].t);
