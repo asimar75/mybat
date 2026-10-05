@@ -76,7 +76,7 @@ function line(label: string, data: number[], color: string, dashed = false) {
   };
 }
 
-export function renderCharts(rec: Recommendation, highlight: SweepRow | null, currency: string) {
+export function renderCharts(rec: Recommendation, currency: string) {
   const t = tokens();
   const sizes = rec.rows.map((r) => `${r.nominalKwh}`);
 
@@ -131,9 +131,26 @@ export function renderCharts(rec: Recommendation, highlight: SweepRow | null, cu
     },
   });
 
+}
+
+/** Blend two #rrggbb colours; `amount` 0 gives `a`, 1 gives `b`. Falls back to `a` for other formats. */
+function mix(a: string, b: string, amount: number): string {
+  const rgb = (c: string) => (/^#[0-9a-f]{6}$/i.test(c) ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : null);
+  const x = rgb(a);
+  const y = rgb(b);
+  if (!x || !y) return a;
+  return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * amount)).join(', ')})`;
+}
+
+/**
+ * Grid import per month without a battery and with each size given (smallest first). Sizes share
+ * one hue, lighter for smaller batteries, since they're steps along one scale.
+ */
+export function renderMonthlyChart(rec: Recommendation, sizes: SweepRow[]) {
+  const t = tokens();
+  const shade = (i: number) => (sizes.length < 2 ? t.series1 : mix(t.series1, t.surface, 0.6 * (1 - i / (sizes.length - 1))));
   const months = [...rec.baseline.annual.monthlyImport.keys()];
   const monthly = baseOptions((v) => kwh(v));
-  const sized = highlight ?? rec.knee;
   render('chart-monthly', {
     type: 'bar',
     data: {
@@ -148,19 +165,15 @@ export function renderCharts(rec: Recommendation, highlight: SweepRow | null, cu
           borderColor: t.surface,
           borderWidth: { left: 1, right: 1 },
         },
-        ...(sized
-          ? [
-              {
-                label: `${sized.nominalKwh} kWh battery`,
-                data: months.map((m) => (sized.annual.monthlyImport.get(m) ?? 0)),
-                backgroundColor: t.series1,
-                borderRadius: 4,
-                borderSkipped: 'bottom' as const,
-                borderColor: t.surface,
-                borderWidth: { left: 1, right: 1 },
-              },
-            ]
-          : []),
+        ...sizes.map((sized, i) => ({
+          label: `${sized.nominalKwh} kWh battery`,
+          data: months.map((m) => sized.annual.monthlyImport.get(m) ?? 0),
+          backgroundColor: shade(i),
+          borderRadius: 4,
+          borderSkipped: 'bottom' as const,
+          borderColor: t.surface,
+          borderWidth: { left: 1, right: 1 },
+        })),
       ],
     },
     options: {

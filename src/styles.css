@@ -709,3 +709,32 @@ tr.short td:last-child {
 .date-display:hover {
   border-color: var(--accent);
 }
+
+.size-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 8px;
+}
+.size-chip {
+  font: inherit;
+  font-size: 0.8rem;
+  min-width: 2.4em;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.size-chip[aria-pressed='true'] {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: var(--accent-ink);
+}
+.size-chip:disabled {
+  cursor: default;
+}
+.size-chip:disabled:not([aria-pressed='true']) {
+  opacity: 0.4;
+}
