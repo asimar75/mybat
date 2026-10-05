@@ -1016,8 +1016,8 @@ function showDay(day: string) {
   if (!data) return;
   selectedDay = day;
   setDateField(dayPick, day);
-  $<HTMLButtonElement>('#day-prev-week').disabled = day <= dayPick.min;
-  $<HTMLButtonElement>('#day-next-week').disabled = day >= dayPick.max;
+  $<HTMLButtonElement>('#day-prev').disabled = day <= dayPick.min;
+  $<HTMLButtonElement>('#day-next').disabled = day >= dayPick.max;
   const samples = data.samples.filter((s) => localDay(s.t) === day);
   renderDataCharts(daily, profile, samples, (d) => showDay(d));
   renderDayTable(samples);
@@ -1037,7 +1037,7 @@ function renderValidation() {
   showDay(lastFull.day);
 }
 
-for (const [id, n] of [['#day-prev-week', -7], ['#day-next-week', 7]] as const) {
+for (const [id, n] of [['#day-prev', -1], ['#day-next', 1]] as const) {
   $(id).addEventListener('click', () => {
     if (selectedDay) showDay(addDays(selectedDay, n, dayPick.min, dayPick.max));
   });
