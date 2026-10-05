@@ -149,12 +149,22 @@ describe('combineMeters', () => {
     expect(r.peakRegisterGuess).toBe(1);
   });
 
-  it('trims to the common period, or zero-fills a short EV file with a note', () => {
-    const common = combineMeters(assigned, true);
-    expect(common.samples.length).toBeLessThan(48);
-    expect(common.notes.join(' ')).toMatch(/EV\.csv has no readings after .*untick “Only use the period every file covers”/);
-    const all = combineMeters(assigned, false);
-    expect(all.notes.join(' ')).toMatch(/no EV or water-heater data/);
+  it('zero-fills a short EV file instead of cutting the other meters', () => {
+    // EV.csv goes blank after 37.5 h (charger switched off); grid and solar run the full 48 h.
+    const r = combineMeters(assigned, true);
+    expect(r.samples).toHaveLength(48);
+    expect(r.samples.slice(38).every((s) => s.ev === 0)).toBe(true);
+    const notes = r.notes.join(' ');
+    expect(notes).toMatch(/EV\.csv has no readings after .*count as 0 EV charging/);
+    expect(notes).not.toMatch(/hours had no EV or water-heater data/); // the edge is explained once, not twice
+    expect(combineMeters(assigned, false).samples).toHaveLength(48);
+  });
+
+  it('trims to the period the grid and solar files both cover', () => {
+    const shortSolar = parseMeterCsv('Panels.csv', solarCsv.split('\n').slice(0, 100).join('\n') + '\n');
+    const r = combineMeters([{ meter: meters[0], role: 'grid' }, { meter: shortSolar, role: 'solar' }], true);
+    expect(r.samples.length).toBeLessThan(26);
+    expect(r.notes.join(' ')).toMatch(/Using .* the period the grid and solar files all cover: Panels\.csv has no readings after/);
   });
 
   it('keeps measured grid flows and reports what hourly netting cancels', () => {
