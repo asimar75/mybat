@@ -200,7 +200,9 @@ The recommended size is the one with the highest **net benefit** over the period
 (10, 20, 30 or 40 years): savings, minus the purchase, minus replacements, plus the value of the
 life left in the last battery at the end (straight-line), all in today's money: later amounts are
 discounted at a rate above inflation (default 2 %; set 0 to switch it off). If none is positive,
-the app says so.
+the app says so. Next to the simple payback (price ÷ first-year saving) it shows the **discounted
+payback**: when the discounted, fading savings have repaid the purchase and any replacement bought
+before then (leftover value isn't counted, so it's the stricter of the two).
 
 **Wear and replacement.** A battery loses capacity from age (default 1 % a year) and from cycling:
 its rated cycles (LFP: about 6,000) use up the 30 % down to 70 % capacity, when it's replaced at a
