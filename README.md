@@ -198,7 +198,9 @@ For every hour:
 
 The recommended size is the one with the highest **net benefit** over the period you compare
 (10, 20, 30 or 40 years): savings, minus the purchase, minus replacements, plus the value of the
-life left in the last battery at the end (straight-line). If none is positive, the app says so.
+life left in the last battery at the end (straight-line), all in today's money: later amounts are
+discounted at a rate above inflation (default 2 %; set 0 to switch it off). If none is positive,
+the app says so.
 
 **Wear and replacement.** A battery loses capacity from age (default 1 % a year) and from cycling:
 its rated cycles (LFP: about 6,000) use up the 30 % down to 70 % capacity, when it's replaced at a
@@ -211,7 +213,8 @@ what a smaller new one would, so an oversized battery hardly notices its wear.
 - **Hourly resolution** misses spikes inside an hour and nets import against export within each hour, so savings are slightly underestimated.
 - **Less than a year of data** is scaled up, but solar is seasonal. A summer-only sample overstates winter performance.
 - Future tariffs, battery prices and degradation are your assumptions.
-- Money isn't discounted: a euro saved in 30 years counts the same as one today, which flatters long periods.
+- Prices stay at today's level for the whole period; the discount rate (default 2 % above inflation)
+  is the only adjustment for time. A higher rate shrinks long-period results the most.
 
 ## Project layout
 

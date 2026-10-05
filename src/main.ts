@@ -436,6 +436,7 @@ function readSettings() {
     calendarLossPerYear: Math.max(0, n('calendarLossPct', 1)) / 100,
     cycleLife: Math.max(100, n('cycleLife', 6000)),
     replacementFraction: Math.max(0, n('replacementPct', 70)) / 100,
+    discountRate: Math.min(0.2, Math.max(-0.05, n('discountPct', 2) / 100)),
   };
   const template = {
     usableFraction: Math.min(1, Math.max(0.1, n('usablePct', 95) / 100)),
@@ -672,7 +673,7 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
         <p class="hero">${best.nominalKwh} kWh</p>
         <p>${num1(best.usableKwh)} kWh usable, ${num1(best.powerKw)} kW. Costs ${money(best.investment, currency)},
         saves ${money(best.annualSavings, currency)} in year one, pays back in ${years(best.paybackYears)}, and leaves you
-        <b>${money(best.netBenefit, currency)}</b> ahead over ${lifetime} years.</p>
+        <b>${money(best.netBenefit, currency)}</b> ahead over ${lifetime} years${discountNote()}.</p>
         <p>${lifespan(best, currency, lifetime)}</p>
         <p>Self-sufficiency goes from ${pct(base.selfSufficiency)} to ${pct(best.annual.selfSufficiency)}.</p>
       </div>`;
@@ -689,16 +690,23 @@ function verdict(rec: Recommendation, currency: string, lifetime: number): strin
     </div>`;
 }
 
+/** ", in today's money (2 % discount rate)" when later amounts are discounted. */
+function discountNote(): string {
+  const rate = lastCfg?.economics.discountRate ?? 0;
+  return rate ? `, in today's money (${+(rate * 100).toFixed(1)} % discount rate)` : '';
+}
+
 const lasts = (r: SweepRow) => (Number.isFinite(r.lifeYears) ? years(r.lifeYears) : 'indefinitely');
 
 /** How long a size lasts and what wear costs over the comparison period. */
 function lifespan(r: SweepRow, currency: string, horizon: number): string {
   const life = Number.isFinite(r.lifeYears) ? `about ${years(r.lifeYears)}` : lasts(r);
+  const today = lastCfg?.economics.discountRate ? " in today's money" : '';
   const replaced = r.replacements
-    ? `replaced ${r.replacements === 1 ? 'once' : `${r.replacements} times`} within ${horizon} years (${money(r.replacementCost, currency)})`
+    ? `replaced ${r.replacements === 1 ? 'once' : `${r.replacements} times`} within ${horizon} years (${money(r.replacementCost, currency)}${today})`
     : `not replaced within ${horizon} years`;
   return `At ${Math.round(r.annual.cycles)} cycles a year it lasts ${life} before dropping to 70 % capacity, so it's ${replaced}; ` +
-    `the life left at the end is worth ${money(r.residualValue, currency)}, counted in the net benefit.`;
+    `the life left at the end is worth ${money(r.residualValue, currency)}${today}, counted in the net benefit.`;
 }
 
 function insights(rec: Recommendation, focus: SweepRow | null, currency: string, evMode: string, extra: string[] = []): string {

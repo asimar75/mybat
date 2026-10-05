@@ -81,6 +81,11 @@ export interface Economics {
   cycleLife: number;
   /** Price of a replacement, as a fraction of today's total price (battery prices keep falling). */
   replacementFraction: number;
+  /**
+   * Yearly discount rate above inflation, 0–1. Prices are held at today's level, so this is a real
+   * rate: money saved in later years counts for less than money spent now.
+   */
+  discountRate: number;
 }
 
 export interface SimResult {
