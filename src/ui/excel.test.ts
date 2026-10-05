@@ -9,7 +9,7 @@ import { buildSheets, type ExportInput } from './excel';
 
 const tariff: Tariff = { importFlat: 0.3, useTimeOfUse: false, importPeak: 0, importOffPeak: 0, peakStartHour: 7, peakEndHour: 23, exportPrice: 0.08 };
 const template = { usableFraction: 0.95, inverterKw: 5, cRate: 0.5, roundTripEfficiency: 0.9 };
-const economics = { costPerKwh: 300, fixedCost: 1000, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7 };
+const economics = { costPerKwh: 300, fixedCost: 1000, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7, discountRate: 0 };
 const options = { evMode: 'exclude' as const, gridCharge: false, gridChargeTarget: 1 };
 
 function input(): ExportInput {

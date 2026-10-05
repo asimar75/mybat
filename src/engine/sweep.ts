@@ -14,12 +14,12 @@ export interface SweepRow {
   fadePerYear: number;
   /** Years until the battery is down to END_OF_LIFE capacity and gets replaced. */
   lifeYears: number;
-  /** Replacements within the horizon and what they cost. */
+  /** Replacements within the horizon and what they cost (present value). */
   replacements: number;
   replacementCost: number;
-  /** Straight-line value of the life left in the last battery when the horizon ends. */
+  /** Straight-line value of the life left in the last battery when the horizon ends (present value). */
   residualValue: number;
-  /** Savings summed over the horizon, as capacity fades and batteries are replaced. */
+  /** Savings summed over the horizon, as capacity fades and batteries are replaced (present value). */
   lifetimeSavings: number;
   /** lifetimeSavings − investment − replacementCost + residualValue */
   netBenefit: number;
@@ -94,7 +94,8 @@ function savingsAt(rows: { nominalKwh: number; annualSavings: number }[], kwh: n
 /**
  * Year by year over the horizon: capacity fades, so a battery saves what a smaller new one would
  * (an oversized battery barely notices); at END_OF_LIFE it is replaced, and whatever life the last
- * one has left at the end is credited at its straight-line value.
+ * one has left at the end is credited at its straight-line value. All amounts are present values:
+ * savings at the end of each year, replacements when they happen, leftover value at the horizon.
  */
 export function lifecycle(
   row: { nominalKwh: number; investment: number; annual: SimResult },
@@ -104,6 +105,7 @@ export function lifecycle(
   const fade = fadePerYear(row.annual.cycles, economics);
   const lifeYears = fade > 0 ? (1 - END_OF_LIFE) / fade : Infinity;
   if (row.nominalKwh === 0) return { fadePerYear: 0, lifeYears: Infinity, replacements: 0, replacementCost: 0, residualValue: 0, lifetimeSavings: 0 };
+  const presentValue = (amount: number, years: number) => amount * Math.pow(1 + economics.discountRate, -years);
   let age = 0;
   let lastPrice = row.investment;
   let replacements = 0;
@@ -113,14 +115,15 @@ export function lifecycle(
     if (age >= lifeYears - 1e-9) {
       replacements++;
       lastPrice = row.investment * economics.replacementFraction;
-      replacementCost += lastPrice;
+      replacementCost += presentValue(lastPrice, y);
       age = 0;
     }
     const capacity = Math.max(END_OF_LIFE, 1 - fade * (age + 0.5));
-    lifetimeSavings += savingsAt(rows, row.nominalKwh * capacity);
+    lifetimeSavings += presentValue(savingsAt(rows, row.nominalKwh * capacity), y + 1);
     age++;
   }
-  const residualValue = Number.isFinite(lifeYears) ? lastPrice * Math.max(0, 1 - age / lifeYears) : lastPrice;
+  const leftover = Number.isFinite(lifeYears) ? lastPrice * Math.max(0, 1 - age / lifeYears) : lastPrice;
+  const residualValue = presentValue(leftover, Math.floor(economics.horizonYears));
   return { fadePerYear: fade, lifeYears, replacements, replacementCost, residualValue, lifetimeSavings };
 }
 

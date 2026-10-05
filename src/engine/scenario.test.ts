@@ -40,7 +40,7 @@ describe('applyScenario', () => {
         sizeRange(10, 5),
         { importFlat: 0.3, useTimeOfUse: false, importPeak: 0, importOffPeak: 0, peakStartHour: 7, peakEndHour: 23, exportPrice: 0.08 },
         { evMode: 'exclude', gridCharge: false, gridChargeTarget: 1 },
-        { costPerKwh: 400, fixedCost: 1500, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7 },
+        { costPerKwh: 400, fixedCost: 1500, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7, discountRate: 0 },
       );
       return rec.rows.find((r) => r.nominalKwh === 10)!.annualSavings;
     };

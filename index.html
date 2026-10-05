@@ -52,7 +52,8 @@
             <label>Rated cycles (to 70 % capacity) <input name="cycleLife" type="number" step="500" min="500" value="6000" /></label>
             <label>Capacity loss per year from age % <input name="calendarLossPct" type="number" step="0.25" min="0" max="10" value="1" /></label>
             <label>Replacement price, % of today's <input name="replacementPct" type="number" step="5" min="0" max="200" value="70" /></label>
-            <p class="hint" style="margin:0">Wear = age + cycling. A battery is replaced at 70 % capacity; a bigger one cycles less, so it lasts longer. LFP cells are typically rated 6,000+ cycles.</p>
+            <label>Discount rate above inflation % <input name="discountPct" type="number" step="0.5" min="-5" max="20" value="2" /></label>
+            <p class="hint" style="margin:0">Wear = age + cycling. A battery is replaced at 70 % capacity; a bigger one cycles less, so it lasts longer. LFP cells are typically rated 6,000+ cycles. The discount rate makes later savings count for less: use what your money would earn elsewhere minus inflation (0 = no discounting).</p>
           </fieldset>
           <fieldset>
             <legend>EV reimbursement</legend>

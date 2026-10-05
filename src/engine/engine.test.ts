@@ -100,7 +100,7 @@ describe('tariff windows', () => {
   });
 });
 
-const econ = { costPerKwh: 400, fixedCost: 1500, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7 };
+const econ = { costPerKwh: 400, fixedCost: 1500, horizonYears: 12, calendarLossPerYear: 0.01, cycleLife: 6000, replacementFraction: 0.7, discountRate: 0 };
 
 describe('sweep', () => {
   const template = { usableFraction: 0.95, inverterKw: 5, cRate: 0.5, roundTripEfficiency: 0.9 };
@@ -165,6 +165,13 @@ describe('helpers', () => {
     // A worn 10 kWh battery saves what a smaller new one would: between the 5 and 10 kWh savings.
     expect(over30.lifetimeSavings).toBeLessThan(30 * 700);
     expect(over30.lifetimeSavings).toBeGreaterThan(30 * 600);
+    // Discounting: later savings, replacements and the leftover value all count for less today.
+    const discounted = lifecycle(row, rows, { ...econ, horizonYears: 30, discountRate: 0.03 });
+    expect(discounted.lifetimeSavings).toBeLessThan(over30.lifetimeSavings * 0.7);
+    expect(discounted.replacementCost).toBeCloseTo(0.7 * 5500 * (1.03 ** -12 + 1.03 ** -24));
+    expect(discounted.residualValue).toBeCloseTo(0.7 * 5500 * 0.5 * 1.03 ** -30);
+    const oneYear = lifecycle({ ...row, annual: { cycles: 0 } as never }, rows, { ...econ, calendarLossPerYear: 0, horizonYears: 1, discountRate: 0.05 });
+    expect(oneYear.lifetimeSavings).toBeCloseTo(700 / 1.05); // a full year's saving, received at the year's end
     const over10 = lifecycle(row, rows, { ...econ, horizonYears: 10 });
     expect(over10.replacements).toBe(0);
     expect(over10.residualValue).toBeCloseTo(5500 * (1 - 10 / 12));
