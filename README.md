@@ -148,8 +148,9 @@ The app reports how many kWh that is; typically 2–4 % of import. Consumption i
 too low (the app warns when the grid meter exports but no solar file is assigned).
 
 **More than a year of data** (e.g. two HomeWizard downloads, since 15-minute data is kept for one
-year): the app uses the last 12 months by default so each season counts once; switch to the whole
-period in the summary. Download every meter for the same period, or the shortest file sets the range.
+year): the app uses the last 12 months by default so each season counts once. In the summary you can
+switch to any 12 calendar months, e.g. Aug–Jul to match the HomeWizard year view exactly, or to the
+whole period. Download every meter for the same period, or the shortest file sets the range.
 
 ### No Home Assistant?
 

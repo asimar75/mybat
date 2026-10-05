@@ -459,7 +459,7 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     }
     if (lost > 1) {
       notes.push(
-        `Grid meter: ${Math.round(measuredIn).toLocaleString()} kWh imported and ${Math.round(measuredOut).toLocaleString()} kWh exported. ` +
+        `Grid meter, whole loaded period: ${Math.round(measuredIn).toLocaleString()} kWh imported and ${Math.round(measuredOut).toLocaleString()} kWh exported. ` +
           `The simulation works hour by hour, where ${Math.round(lost).toLocaleString()} kWh of import and export in the same hour ` +
           `(${((lost / Math.max(1, measuredIn)) * 100).toFixed(1)} % of import) cancel out; the meter and HomeWizard count both. ` +
           'Battery savings are therefore slightly conservative.',

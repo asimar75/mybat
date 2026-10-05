@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { HourSample } from '../engine/types';
 import { parseCsv } from './csv';
 import { demoYear } from './demo';
-import { addDays, dailyTotals, hourProfile, lastTwelveMonths, monthlyTotals, runChecks, spansMoreThanAYear, toCsv } from './validate';
+import { addDays, dailyTotals, hourProfile, lastTwelveMonths, monthlyTotals, runChecks, spansMoreThanAYear, toCsv, twelveMonthsFrom, yearStarts } from './validate';
 
 const H = 3600 * 1000;
 const start = new Date(2025, 5, 1, 0).getTime();
@@ -98,6 +98,21 @@ describe('period helpers', () => {
     expect(last[last.length - 1].t).toBe(samples[samples.length - 1].t);
     expect(last.length).toBeGreaterThanOrEqual(365 * 24 - 24);
     expect(last.length).toBeLessThanOrEqual(366 * 24);
+  });
+
+  it('lists full 12-calendar-month windows and cuts one out', () => {
+    // 01/Apr/2025 00:00 – 30/Sep/2026 23:00, like two HomeWizard downloads.
+    const t0 = new Date(2025, 3, 1).getTime();
+    const end = new Date(2026, 9, 1).getTime();
+    const samples: HourSample[] = [];
+    for (let t = t0; t < end; t += H) samples.push({ t, house: 1, ev: 0, solar: 0 });
+    expect(yearStarts(samples)).toEqual(['2025-04', '2025-05', '2025-06', '2025-07', '2025-08', '2025-09', '2025-10']);
+    expect(yearStarts(samples.slice(48))).not.toContain('2025-04'); // first month incomplete (one missing hour is tolerated)
+    expect(yearStarts(samples.slice(0, -48))).not.toContain('2025-10'); // last month incomplete
+    const hwYear = twelveMonthsFrom(samples, '2025-08');
+    expect(new Date(hwYear[0].t)).toEqual(new Date(2025, 7, 1));
+    expect(new Date(hwYear[hwYear.length - 1].t)).toEqual(new Date(2026, 6, 31, 23));
+    expect(monthlyTotals(hwYear).map((m) => m.month)).toHaveLength(12);
   });
 
   it('round-trips measured grid flows through CSV', () => {
