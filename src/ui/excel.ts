@@ -5,6 +5,7 @@ import type { ReimbursementResult } from '../engine/reimbursement';
 import type { Recommendation } from '../engine/sweep';
 import type { BatterySpec, Economics, HourSample, SimOptions, Tariff } from '../engine/types';
 import { hasWaterHeater, monthlyTotals } from '../data/validate';
+import { fmtDate, fmtDateTime, fmtMonth } from './format';
 
 /** Everything the export needs; built by main.ts from the current page state. */
 export interface ExportInput {
@@ -51,7 +52,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
 
   // ---- Summary ----
   const summary: Cell[][] = [
-    [bold('Battery Sizer result'), text(input.generatedAt.toLocaleString())],
+    [bold('Battery Sizer result'), text(fmtDateTime(input.generatedAt.getTime()))],
     [],
     [bold('Recommendation')],
     [text('Verdict'), text(rec.best ? 'Best value' : 'No size pays back within the lifetime')],
@@ -71,7 +72,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
     [],
     [bold('Data')],
     [text('Source'), text(input.dataLabel)],
-    [text('Period'), text(`${new Date(first).toLocaleDateString()} – ${new Date(last).toLocaleDateString()}`)],
+    [text('Period'), text(`${fmtDate(first)} – ${fmtDate(last)}`)],
     [text('Hours of data'), num(input.samples.length, '#,##0')],
     [text('Yearly consumption (kWh)'), num(base.totalLoadKwh, '#,##0')],
     [text('Yearly solar (kWh)'), num(base.solarKwh, '#,##0')],
@@ -147,7 +148,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
       'Hours with data',
     ]),
     ...months.map((m) => [
-      text(m.month),
+      text(fmtMonth(m.month)),
       num(m.house),
       num(m.ev),
       ...(withWh ? [num(m.wh)] : []),
@@ -168,7 +169,7 @@ export function buildSheets(input: ExportInput): Sheet<Blob>[] {
   const hourly: Cell[][] = [
     header(['Time', 'House kWh', 'EV kWh', ...(withWh ? ['Water heater kWh'] : []), 'Solar kWh', ...(withRate ? ['Tariff register'] : [])]),
     ...input.samples.map((s) => [
-      { value: localDate(s.t), type: Date, format: 'yyyy-mm-dd hh:mm' } as Cell,
+      { value: localDate(s.t), type: Date, format: 'dd/mmm/yyyy hh:mm' } as Cell,
       num(s.house, '0.000'),
       num(s.ev, '0.000'),
       ...(withWh ? [num(s.wh ?? 0, '0.000')] : []),

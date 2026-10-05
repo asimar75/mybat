@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { HourSample } from '../engine/types';
 import { parseCsv } from './csv';
 import { demoYear } from './demo';
-import { dailyTotals, hourProfile, monthlyTotals, runChecks, toCsv } from './validate';
+import { addDays, dailyTotals, hourProfile, monthlyTotals, runChecks, toCsv } from './validate';
 
 const H = 3600 * 1000;
 const start = new Date(2025, 5, 1, 0).getTime();
@@ -75,6 +75,16 @@ describe('runChecks', () => {
     const samples = day().map((s) => ({ ...s, ev: 0, house: s.t < start + 6 * H ? 0 : 0.4 }));
     expect(byId(samples, 'ev').title).toMatch(/No EV/);
     expect(byId(samples, 'zero-load').ok).toBe(false);
+  });
+});
+
+describe('addDays', () => {
+  it('moves by calendar days across month ends and clock changes, with clamping', () => {
+    expect(addDays('2025-10-30', 7)).toBe('2025-11-06');
+    expect(addDays('2026-03-26', 7)).toBe('2026-04-02');
+    expect(addDays('2025-01-03', -7)).toBe('2024-12-27');
+    expect(addDays('2025-01-03', -7, '2025-01-01')).toBe('2025-01-01');
+    expect(addDays('2025-12-28', 7, undefined, '2025-12-31')).toBe('2025-12-31');
   });
 });
 

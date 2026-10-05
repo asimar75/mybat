@@ -57,6 +57,16 @@ export function localDay(t: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** Moves a "YYYY-MM-DD" day by n calendar days, clamped to [min, max] when given. Noon avoids DST edges. */
+export function addDays(day: string, n: number, min?: string, max?: string): string {
+  const d = new Date(`${day}T12:00`);
+  d.setDate(d.getDate() + n);
+  let out = localDay(d.getTime());
+  if (min && out < min) out = min;
+  if (max && out > max) out = max;
+  return out;
+}
+
 function localMonth(t: number): string {
   const d = new Date(t);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;

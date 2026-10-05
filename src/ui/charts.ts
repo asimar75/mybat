@@ -15,7 +15,7 @@ import {
 import type { Recommendation, SweepRow } from '../engine/sweep';
 import type { DayTotals, HourProfile } from '../data/validate';
 import type { HourSample } from '../engine/types';
-import { kwh, money, num1, pct } from './format';
+import { fmtDayMonth, fmtMonth, fmtTime, fmtWeekdayDay, kwh, money, num1, pct } from './format';
 
 Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
 
@@ -136,7 +136,7 @@ export function renderCharts(rec: Recommendation, highlight: SweepRow | null, cu
   render('chart-monthly', {
     type: 'bar',
     data: {
-      labels: months.map((m) => new Date(`${m}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })),
+      labels: months.map((m) => fmtMonth(m)),
       datasets: [
         {
           label: 'No battery',
@@ -205,7 +205,7 @@ export function renderDataCharts(
     data: { labels: daily.map((d) => d.day), datasets: entities((k) => daily.map((d) => d[k])) },
     options: {
       ...dailyOpts,
-      plugins: kwhTooltip(dailyOpts, (label) => new Date(`${label}T12:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) + ' · click to inspect'),
+      plugins: kwhTooltip(dailyOpts, (label) => `${fmtWeekdayDay(label)}/${label.slice(0, 4)} · click to inspect`),
       scales: {
         ...dailyOpts.scales,
         x: {
@@ -216,9 +216,9 @@ export function renderDataCharts(
             autoSkip: true,
             maxTicksLimit: 12,
             callback(this: { getLabelForValue: (v: number) => string }, v: number | string) {
-              const date = new Date(`${this.getLabelForValue(Number(v))}T12:00`);
+              const day = this.getLabelForValue(Number(v));
               // Short periods need the day in the label, or every tick in a month reads the same.
-              return date.toLocaleDateString(undefined, daily.length <= 120 ? { day: 'numeric', month: 'short' } : { month: 'short', year: '2-digit' });
+              return daily.length <= 120 ? fmtDayMonth(day) : fmtMonth(day);
             },
           },
         },
@@ -240,7 +240,7 @@ export function renderDataCharts(
   });
 
   const dayOpts = baseOptions((v) => `${num1(v)} kWh`);
-  const dayLabels = day.map((s) => new Date(s.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
+  const dayLabels = day.map((s) => fmtTime(s.t));
   render('chart-day', {
     type: 'line',
     data: {
@@ -276,7 +276,7 @@ export function renderBatteryCharts(w: BatteryWindow) {
   const t = tokens();
   const multiDay = w.times.length > 24;
   const labels = w.times.map((ms) =>
-    new Date(ms).toLocaleString(undefined, multiDay ? { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' }),
+    multiDay ? `${fmtWeekdayDay(ms)} ${fmtTime(ms)}` : fmtTime(ms),
   );
   const xTicks = { color: t.muted, maxRotation: 0, autoSkip: true, maxTicksLimit: multiDay ? 10 : 12 };
   const kwhLabel = (item: { dataset: { label?: string }; parsed: { y: number | null } }) =>

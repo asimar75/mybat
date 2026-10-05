@@ -9,11 +9,11 @@ import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole,
 import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
-import { dailyTotals, hasWaterHeater, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
+import { addDays, dailyTotals, hasWaterHeater, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, loadDataset, saveDataset } from './data/persist';
 import { renderBatteryCharts, renderCharts, renderDataCharts } from './ui/charts';
 import { exportExcel } from './ui/excel';
-import { dateRange, escapeHtml, kwh, money, num1, pct, years } from './ui/format';
+import { dateRange, escapeHtml, fmtDate, fmtDateTime, fmtMonth, fmtTime, kwh, money, num1, pct, years } from './ui/format';
 
 // ---------- small helpers ----------
 
@@ -86,7 +86,7 @@ function setData(samples: HourSample[], label: string, notes: string[] = [], res
   dataLabel = label;
   // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
   if (restoredAt !== undefined) {
-    setStatus(`Restored ${label}, loaded ${new Date(restoredAt).toLocaleString()}. Load new data to replace it.`, 'ok');
+    setStatus(`Restored ${label}, loaded ${fmtDateTime(restoredAt)}. Load new data to replace it.`, 'ok');
   } else if (saveDataset({ samples, label, notes, savedAt: Date.now() })) {
     setStatus(`Loaded ${label}. It stays here after a page refresh until you load new data.`, 'ok');
   } else {
@@ -121,7 +121,7 @@ function savedRoles(): Record<string, MeterRole> {
 }
 
 function renderMeterFiles() {
-  const fmt = (t: number) => new Date(t).toLocaleDateString();
+  const fmt = fmtDate;
   $('#meter-rows').innerHTML = meterFiles
     .map((f, i) => {
       if (!f.meter) return `<tr><td>${escapeHtml(f.name)}</td><td colspan="4" class="flag">${escapeHtml(f.error ?? 'Unreadable')}</td></tr>`;
@@ -472,7 +472,7 @@ function renderMonthPrices() {
   const saved = loadMonthPrices();
   $('#reimb-months').innerHTML = data.monthKeys
     .map((m) => {
-      const label = new Date(`${m}-01T12:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+      const label = fmtMonth(m);
       const value = saved[m] !== undefined ? String(saved[m]) : '';
       return `<label>${label}<input type="number" step="0.001" min="0" data-month="${m}" value="${value}" placeholder="default" /></label>`;
     })
@@ -735,7 +735,16 @@ function renderResults(rec: Recommendation, currency: string, evMode: string, li
           .map((r) => `<option value="${r.nominalKwh}">${r.nominalKwh} kWh${r === rec.best ? ' (best value)' : r === rec.knee ? ' (90 % of max saving)' : ''}</option>`)
           .join('')}</select>
       </label>
-      <label>From <input id="sim-start" type="date" /></label>
+      <label>From
+        <span class="date-step">
+          <button class="link-btn" type="button" data-sim-shift="-7" aria-label="Previous week">◀ Week</button>
+          <span class="date-field">
+            <input id="sim-start" type="date" class="date-native" tabindex="-1" aria-hidden="true" />
+            <button type="button" class="date-display" data-for="sim-start" aria-label="Choose the start date"></button>
+          </span>
+          <button class="link-btn" type="button" data-sim-shift="7" aria-label="Next week">Week ▶</button>
+        </span>
+      </label>
       <label>Show
         <select id="sim-days"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option></select>
       </label>
@@ -826,7 +835,9 @@ function renderBatterySim(rec: Recommendation) {
   sizeSel.value = String(size);
   startIn.min = first;
   startIn.max = last;
-  startIn.value = simStart;
+  setDateField(startIn, simStart);
+  $<HTMLButtonElement>('[data-sim-shift="-7"]').disabled = simStart <= first;
+  $<HTMLButtonElement>('[data-sim-shift="7"]').disabled = simStart >= last;
   $<HTMLSelectElement>('#sim-days').value = String(simDays);
   $<HTMLSelectElement>('#sim-ev').value = lastCfg.options.evMode;
 
@@ -871,6 +882,15 @@ function renderBatterySim(rec: Recommendation) {
     : 'No data in this period.';
 }
 
+// Week buttons keep the chosen span and move the window by 7 days, within the data.
+$('#results-body').addEventListener('click', (e) => {
+  const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-sim-shift]');
+  if (!button || !lastRec || !simData) return;
+  const samples = simData.samples;
+  simStart = addDays(simStart, Number(button.dataset.simShift), localDay(samples[0].t), localDay(samples[samples.length - 1].t));
+  renderBatterySim(lastRec);
+});
+
 $('#results-body').addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement | HTMLSelectElement;
   if (!lastRec) return;
@@ -910,7 +930,7 @@ function downloadText(text: string, filename: string) {
 }
 
 function shortDateTime(t: number): string {
-  return new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return fmtDateTime(t);
 }
 
 let failedChecks: string[] = [];
@@ -960,7 +980,7 @@ function renderMonthTable() {
       </tr></thead>
       <tbody>
         ${months
-          .map((m) => row(new Date(`${m.month}-01T12:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }), m))
+          .map((m) => row(fmtMonth(m.month), m))
           .join('')}
         ${row('Total', total, 'hl')}
       </tbody>
@@ -981,7 +1001,7 @@ function renderDayTable(samples: HourSample[]) {
             const h = new Date(s.t).getHours();
             const wh = s.wh ?? 0;
             const load = s.house + s.ev + wh;
-            return `<tr><td>${new Date(s.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</td>
+            return `<tr><td>${fmtTime(s.t)}</td>
               ${cell(s.house, s.house > LIMITS.houseKwh || load < 0.01)}${cell(s.ev, s.ev > LIMITS.evKwh)}
               ${withWh ? cell(wh, wh > LIMITS.whKwh) : ''}
               ${cell(s.solar, h <= 3 && s.solar > LIMITS.nightSolarKwh)}
@@ -995,7 +1015,9 @@ function renderDayTable(samples: HourSample[]) {
 function showDay(day: string) {
   if (!data) return;
   selectedDay = day;
-  dayPick.value = day;
+  setDateField(dayPick, day);
+  $<HTMLButtonElement>('#day-prev-week').disabled = day <= dayPick.min;
+  $<HTMLButtonElement>('#day-next-week').disabled = day >= dayPick.max;
   const samples = data.samples.filter((s) => localDay(s.t) === day);
   renderDataCharts(daily, profile, samples, (d) => showDay(d));
   renderDayTable(samples);
@@ -1013,6 +1035,12 @@ function renderValidation() {
   renderChecks();
   renderMonthTable();
   showDay(lastFull.day);
+}
+
+for (const [id, n] of [['#day-prev-week', -7], ['#day-next-week', 7]] as const) {
+  $(id).addEventListener('click', () => {
+    if (selectedDay) showDay(addDays(selectedDay, n, dayPick.min, dayPick.max));
+  });
 }
 
 dayPick.addEventListener('change', () => {
@@ -1073,3 +1101,32 @@ $('#data-forget').addEventListener('click', () => {
 
 const saved = loadDataset();
 if (saved) setData(saved.samples, saved.label, saved.notes, saved.savedAt);
+
+// ---------- date fields shown as DD/MMM/YYYY ----------
+// A native date input always displays in the browser's regional format, so it stays hidden and a
+// button shows the date in the app's format and opens the native calendar.
+
+function setDateField(input: HTMLInputElement, day: string) {
+  input.value = day;
+  const display = document.querySelector<HTMLButtonElement>(`.date-display[data-for="${input.id}"]`);
+  if (display) display.textContent = day ? `${fmtDate(day)} ▾` : 'Pick a date ▾';
+}
+
+document.addEventListener('click', (e) => {
+  const button = (e.target as HTMLElement).closest<HTMLButtonElement>('.date-display');
+  if (!button) return;
+  const input = document.getElementById(button.dataset.for ?? '') as HTMLInputElement | null;
+  if (!input) return;
+  try {
+    input.showPicker();
+  } catch {
+    input.focus();
+    input.click();
+  }
+});
+
+// A date picked in the calendar updates the button text too.
+document.addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.classList?.contains('date-native') && input.value) setDateField(input, input.value);
+});

@@ -202,7 +202,14 @@
           <figure>
             <figcaption class="day-pick">
               <span>One day, hour by hour</span>
-              <input id="day-pick" type="date" aria-label="Day to inspect" />
+              <span class="date-step">
+                <button id="day-prev-week" class="link-btn" type="button" aria-label="Previous week">◀ Week</button>
+                <span class="date-field">
+                  <input id="day-pick" type="date" class="date-native" tabindex="-1" aria-hidden="true" />
+                  <button type="button" class="date-display" data-for="day-pick" aria-label="Choose the day to inspect"></button>
+                </span>
+                <button id="day-next-week" class="link-btn" type="button" aria-label="Next week">Week ▶</button>
+              </span>
             </figcaption>
             <div class="chart-box"><canvas id="chart-day" role="img" aria-label="Hourly energy for the selected day"></canvas></div>
           </figure>

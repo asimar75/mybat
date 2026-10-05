@@ -26,7 +26,46 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
+// One date style everywhere, independent of the browser's locale: DD/MMM/YYYY, 24-hour times.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const two = (n: number) => String(n).padStart(2, '0');
+const at = (t: number | string) => (typeof t === 'string' ? new Date(`${t.length === 7 ? `${t}-01` : t}T12:00`) : new Date(t));
+
+/** 05/Oct/2026. Accepts epoch ms, "YYYY-MM-DD" or "YYYY-MM". */
+export function fmtDate(t: number | string): string {
+  const d = at(t);
+  return `${two(d.getDate())}/${MONTHS[d.getMonth()]}/${d.getFullYear()}`;
+}
+
+/** 05/Oct */
+export function fmtDayMonth(t: number | string): string {
+  const d = at(t);
+  return `${two(d.getDate())}/${MONTHS[d.getMonth()]}`;
+}
+
+/** Oct/2026 */
+export function fmtMonth(t: number | string): string {
+  const d = at(t);
+  return `${MONTHS[d.getMonth()]}/${d.getFullYear()}`;
+}
+
+/** 14:00 */
+export function fmtTime(t: number): string {
+  const d = new Date(t);
+  return `${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+/** 05/Oct/2026 14:00 */
+export function fmtDateTime(t: number): string {
+  return `${fmtDate(t)} ${fmtTime(t)}`;
+}
+
+/** Mon 05/Oct */
+export function fmtWeekdayDay(t: number | string): string {
+  return `${WEEKDAYS[at(t).getDay()]} ${fmtDayMonth(t)}`;
+}
+
 export function dateRange(first: number, last: number): string {
-  const f = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  return `${f.format(first)} – ${f.format(last)}`;
+  return `${fmtDate(first)} – ${fmtDate(last)}`;
 }
