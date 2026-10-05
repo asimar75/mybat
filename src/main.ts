@@ -9,7 +9,7 @@ import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole,
 import { deriveSamples, type StatSelection } from './data/derive';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
-import { addDays, dailyTotals, hasWaterHeater, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
+import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, loadDataset, saveDataset } from './data/persist';
 import { renderBatteryCharts, renderCharts, renderDataCharts } from './ui/charts';
 import { exportExcel } from './ui/excel';
@@ -72,16 +72,26 @@ if (savedTab) document.querySelector<HTMLButtonElement>(`[role=tab][data-tab="${
 
 // ---------- data loading ----------
 
+/** Everything loaded; `data` is the part in use (all of it, or the last 12 months of a longer set). */
+let allSamples: HourSample[] = [];
+const PERIOD_KEY = 'mybat.period';
+const usingLastYear = () => spansMoreThanAYear(allSamples) && storage.get(PERIOD_KEY) !== 'all';
+
+function applyPeriod() {
+  data = prepare(usingLastYear() ? lastTwelveMonths(allSamples) : allSamples);
+  simData = null;
+  altData = null;
+  syncVisibility();
+  renderMonthPrices();
+}
+
 function setData(samples: HourSample[], label: string, notes: string[] = [], restoredAt?: number) {
   if (samples.length < 24) {
     setStatus('Not enough data: at least one full day of hourly values is needed.', 'error');
     return;
   }
-  data = prepare(samples);
-  simData = null;
-  altData = null;
-  syncVisibility();
-  renderMonthPrices();
+  allSamples = samples;
+  applyPeriod();
   dataNotes = notes;
   dataLabel = label;
   // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
@@ -510,23 +520,51 @@ function renderSummary() {
   if (!data) return;
   const s = data.samples;
   const f = 8760 / s.length;
-  const sum = (k: 'house' | 'solar' | 'ev' | 'wh') => s.reduce((a, x) => a + (x[k] ?? 0), 0) * f;
+  const total = (pick: (x: HourSample) => number) => s.reduce((a, x) => a + pick(x), 0);
+  // Real totals for the period shown first (comparable with the monitoring app), per-year estimate below.
+  const tile = (label: string, value: number) =>
+    `<div><dt>${label}</dt><dd>${kwh(value)}<small>${Math.abs(f - 1) < 0.02 ? 'in this year' : `≈ ${kwh(value * f)} per year`}</small></dd></div>`;
   const notes = [...dataNotes];
   if (data.days < 330) {
     notes.unshift(
       `Only ${data.days} days of data. Results are scaled to a year, but solar is seasonal — a summer-only sample will badly overstate what a battery achieves in winter. Use a full year if you can.`,
     );
   }
+  const longer = spansMoreThanAYear(allSamples);
+  const periodChoice = longer
+    ? `<label class="period-choice">Period used
+        <select id="period-select">
+          <option value="12m"${usingLastYear() ? ' selected' : ''}>Last 12 months (each season once)</option>
+          <option value="all"${usingLastYear() ? '' : ' selected'}>All ${dateRange(allSamples[0].t, allSamples[allSamples.length - 1].t)}</option>
+        </select>
+      </label>`
+    : '';
+  if (longer && !usingLastYear()) {
+    notes.unshift('Using more than a year: some seasons count twice when results are scaled to one year (e.g. two summers and one winter overstate solar).');
+  }
   $('#summary').innerHTML = `
+    ${periodChoice}
     <dl class="stats">
       <div><dt>Period</dt><dd>${dateRange(s[0].t, s[s.length - 1].t)}<small>${data.days} days</small></dd></div>
-      <div><dt>Household use / yr</dt><dd>${kwh(sum('house'))}</dd></div>
-      <div><dt>EV charging / yr</dt><dd>${kwh(sum('ev'))}</dd></div>
-      ${hasWaterHeater(s) ? `<div><dt>Water heater / yr</dt><dd>${kwh(sum('wh'))}</dd></div>` : ''}
-      <div><dt>Solar / yr</dt><dd>${kwh(sum('solar'))}</dd></div>
+      ${tile('Total use', total((x) => x.house + x.ev + (x.wh ?? 0)))}
+      ${tile('Household (excl. EV' + (hasWaterHeater(s) ? ', water heater)' : ')'), total((x) => x.house))}
+      ${tile('EV charging', total((x) => x.ev))}
+      ${hasWaterHeater(s) ? tile('Water heater', total((x) => x.wh ?? 0)) : ''}
+      ${tile('Solar', total((x) => x.solar))}
+      ${hasMeterGrid(s) ? tile('Grid import (meter)', total((x) => x.gridIn ?? 0)) + tile('Grid export (meter)', total((x) => x.gridOut ?? 0)) : ''}
     </dl>
     ${notes.map((n) => `<p class="note">${escapeHtml(n)}</p>`).join('')}`;
 }
+
+$('#summary').addEventListener('change', (e) => {
+  const el = e.target as HTMLSelectElement;
+  if (el.id !== 'period-select') return;
+  storage.set(PERIOD_KEY, el.value);
+  applyPeriod();
+  renderSummary();
+  renderValidation();
+  recompute();
+});
 
 function recompute() {
   if (!data) return;
@@ -963,20 +1001,29 @@ function renderMonthTable() {
   const months = monthlyTotals(data.samples);
   const withWh = hasWaterHeater(data.samples);
   const fmt = (v: number) => num1(v);
-  const keys = ['house', 'ev', 'wh', 'solar', 'gridImport', 'gridExport', 'hours', 'expectedHours'] as const;
+  const meter = hasMeterGrid(data.samples);
+  const keys = ['house', 'ev', 'wh', 'solar', 'gridImport', 'gridExport', 'meterImport', 'meterExport', 'hours', 'expectedHours'] as const;
   const total = Object.fromEntries(keys.map((k) => [k, months.reduce((a, m) => a + m[k], 0)])) as Record<(typeof keys)[number], number>;
+  // With a grid meter, its own import/export sit next to the hourly-netted values the simulation uses.
+  const gridCells = (m: typeof total) =>
+    meter
+      ? `<td>${fmt(m.meterImport)}</td><td>${fmt(m.gridImport)}</td><td>${fmt(m.meterExport)}</td><td>${fmt(m.gridExport)}</td>`
+      : `<td>${fmt(m.gridImport)}</td><td>${fmt(m.gridExport)}</td>`;
   const row = (label: string, m: typeof total, cls = '') => {
     const coverage = m.expectedHours ? m.hours / m.expectedHours : 1;
     return `<tr${cls || coverage < 0.98 ? ` class="${cls || 'short'}"` : ''}>
       <td>${label}</td><td>${fmt(m.house)}</td><td>${fmt(m.ev)}</td>${withWh ? `<td>${fmt(m.wh)}</td>` : ''}
-      <td>${fmt(m.house + m.ev + m.wh)}</td><td>${fmt(m.solar)}</td><td>${fmt(m.gridImport)}</td><td>${fmt(m.gridExport)}</td>
+      <td>${fmt(m.house + m.ev + m.wh)}</td><td>${fmt(m.solar)}</td>${gridCells(m)}
       <td>${pct(coverage)}</td></tr>`;
   };
+  const gridHead = meter
+    ? '<th>Grid import (meter)</th><th>Import in simulation*</th><th>Grid export (meter)</th><th>Export in simulation*</th>'
+    : '<th>Grid import* kWh</th><th>Grid export* kWh</th>';
   $('#month-table').innerHTML = `
     <table>
       <thead><tr>
         <th>Month</th><th>House kWh</th><th>EV kWh</th>${withWh ? '<th>Water heater kWh</th>' : ''}<th>Total use kWh</th><th>Solar kWh</th>
-        <th>Grid import* kWh</th><th>Grid export* kWh</th><th>Hours with data</th>
+        ${gridHead}<th>Hours with data</th>
       </tr></thead>
       <tbody>
         ${months
@@ -985,8 +1032,11 @@ function renderMonthTable() {
         ${row('Total', total, 'hl')}
       </tbody>
     </table>
-    <p class="hint">* Without a battery, netted per hour. Home Assistant measures import and export continuously,
-    so both of its figures can be slightly higher; total use and solar should match closely.</p>`;
+    <p class="hint">${
+      meter
+        ? '* The simulation works per hour: import and export within the same hour cancel out, so its values are lower than the meter\'s by the same amount. The meter columns, total use and solar should match your monitoring app (e.g. HomeWizard).'
+        : '* Without a battery, netted per hour. Monitoring apps measure import and export continuously, so both of their figures can be slightly higher; total use and solar should match closely.'
+    }</p>`;
 }
 
 function renderDayTable(samples: HourSample[]) {

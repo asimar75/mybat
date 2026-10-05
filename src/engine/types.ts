@@ -12,6 +12,13 @@ export interface HourSample {
   wh?: number;
   /** Tariff register (1 = T1, 2 = T2) the grid meter counted this hour's import on, when known. */
   rate?: 1 | 2;
+  /**
+   * Grid import/export as measured by the meter, when a grid meter was loaded. Can be higher
+   * than the hourly-netted values the simulation works with: within an hour the meter counts
+   * both directions, while netting per hour cancels them against each other.
+   */
+  gridIn?: number;
+  gridOut?: number;
 }
 
 /**

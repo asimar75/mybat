@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { HourSample } from '../engine/types';
 import { parseCsv } from './csv';
 import { demoYear } from './demo';
-import { addDays, dailyTotals, hourProfile, monthlyTotals, runChecks, toCsv } from './validate';
+import { addDays, dailyTotals, hourProfile, lastTwelveMonths, monthlyTotals, runChecks, spansMoreThanAYear, toCsv } from './validate';
 
 const H = 3600 * 1000;
 const start = new Date(2025, 5, 1, 0).getTime();
@@ -85,6 +85,28 @@ describe('addDays', () => {
     expect(addDays('2025-01-03', -7)).toBe('2024-12-27');
     expect(addDays('2025-01-03', -7, '2025-01-01')).toBe('2025-01-01');
     expect(addDays('2025-12-28', 7, undefined, '2025-12-31')).toBe('2025-12-31');
+  });
+});
+
+describe('period helpers', () => {
+  it('keeps the last 12 months of longer data', () => {
+    const t0 = new Date(2025, 3, 1).getTime();
+    const samples = Array.from({ length: 548 * 24 }, (_, i) => ({ t: t0 + i * H, house: 1, ev: 0, solar: 0 }));
+    expect(spansMoreThanAYear(samples)).toBe(true);
+    const last = lastTwelveMonths(samples);
+    expect(spansMoreThanAYear(last)).toBe(false);
+    expect(last[last.length - 1].t).toBe(samples[samples.length - 1].t);
+    expect(last.length).toBeGreaterThanOrEqual(365 * 24 - 24);
+    expect(last.length).toBeLessThanOrEqual(366 * 24);
+  });
+
+  it('round-trips measured grid flows through CSV', () => {
+    const samples = day().map((s) => ({ ...s, gridIn: 0.6, gridOut: 0.2 }));
+    const back = parseCsv(toCsv(samples)).samples;
+    expect(back[5].gridIn).toBeCloseTo(0.6, 3);
+    expect(back[5].gridOut).toBeCloseTo(0.2, 3);
+    expect(back[5].house).toBeCloseTo(samples[5].house, 3);
+    expect(monthlyTotals(samples)[0].meterImport).toBeCloseTo(0.6 * 24, 6);
   });
 });
 

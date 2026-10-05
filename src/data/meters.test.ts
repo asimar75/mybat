@@ -136,6 +136,35 @@ describe('combineMeters', () => {
     expect(all.notes.join(' ')).toMatch(/no EV or water-heater data/);
   });
 
+  it('keeps measured grid flows and reports what hourly netting cancels', () => {
+    const r = combineMeters(assigned, false);
+    const measuredIn = r.samples.reduce((a, s) => a + s.gridIn!, 0);
+    expect(measuredIn).toBeCloseTo(meters[0].importTotal, 6);
+    expect(r.samples.reduce((a, s) => a + s.gridOut!, 0)).toBeCloseTo(meters[0].exportTotal, 6);
+    // This test data never imports and exports in the same hour, so nothing cancels.
+    expect(r.notes.join(' ')).not.toMatch(/cancel out/);
+
+    // Same hour with import and export (15-min readings): the meter counts both, the hourly net cancels them.
+    const mixed = ['time,Import kWh,Export kWh'];
+    let imp = 100;
+    let exp = 50;
+    for (let q = 0; q <= 96; q++) {
+      const d = new Date(2025, 10, 3, 0, q * 15);
+      mixed.push(`${stamp(d)},${imp.toFixed(3)},${exp.toFixed(3)}`);
+      if (q % 2 === 0) imp += 0.3;
+      else exp += 0.2;
+    }
+    const grid = parseMeterCsv('grid.csv', mixed.join('\n'));
+    const sun = parseMeterCsv('Panels.csv', solarCsv);
+    const r2 = combineMeters([{ meter: grid, role: 'grid' }, { meter: sun, role: 'solar' }], true);
+    expect(r2.notes.join(' ')).toMatch(/cancel out/);
+  });
+
+  it('warns when a grid meter exports but no solar file is assigned', () => {
+    const r = combineMeters([{ meter: meters[0], role: 'grid' }], false);
+    expect(r.notes[0]).toMatch(/no solar file is assigned/);
+  });
+
   it('requires a grid or consumption meter', () => {
     expect(() => combineMeters([{ meter: meters[1], role: 'solar' }], false)).toThrow(/Grid connection/);
   });
