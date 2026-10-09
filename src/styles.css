@@ -426,6 +426,7 @@ footer {
   }
   .tabs {
     width: 100%;
+    flex-wrap: wrap; /* four tabs don't fit side by side on a phone */
   }
   .tabs button {
     flex: 1;

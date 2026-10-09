@@ -29,7 +29,8 @@ function toMs(start: number | string): number {
   return typeof start === 'number' ? (start < 1e12 ? start * 1000 : start) : Date.parse(start);
 }
 
-function indexByHour(points: StatisticPoint[] | undefined): Map<number, number> {
+/** kWh per hour start (epoch ms); negative changes (meter resets) count as 0. */
+export function indexByHour(points: StatisticPoint[] | undefined): Map<number, number> {
   const m = new Map<number, number>();
   for (const p of points ?? []) {
     const t = Math.floor(toMs(p.start) / HOUR_MS) * HOUR_MS;

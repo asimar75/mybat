@@ -14,6 +14,7 @@ import {
 } from 'chart.js';
 import type { Recommendation, SweepRow } from '../engine/sweep';
 import type { DayTotals, HourProfile } from '../data/validate';
+import type { HourPair, PeriodPair } from '../data/compare';
 import type { HourSample } from '../engine/types';
 import { fmtDayMonth, fmtMonth, fmtTime, fmtWeekdayDay, kwh, money, num1, pct } from './format';
 
@@ -348,6 +349,84 @@ export function renderBatteryCharts(w: BatteryWindow) {
         x: { ...flowOpts.scales.x, stacked: true, ticks: xTicks },
         y: { ...flowOpts.scales.y, stacked: true },
       },
+    },
+  } as ChartConfiguration);
+}
+
+/** Home Assistant vs CSV for one meter: daily totals (click a day) and that day hour by hour. */
+export function renderCompareCharts(
+  daily: PeriodPair[],
+  day: HourPair[],
+  onPickDay: (day: string) => void,
+) {
+  const t = tokens();
+  // null = no value from that source: the line breaks there instead of dropping to 0.
+  const pair = (csv: (number | null)[], ha: (number | null)[], diff: (number | null)[]) => [
+    { ...line('CSV file', csv as number[], t.series1), tension: 0 },
+    { ...line('Home Assistant', ha as number[], t.series2, true), tension: 0 },
+    { type: 'bar' as const, label: 'Difference (HA − CSV)', data: diff, backgroundColor: t.muted, borderColor: t.muted },
+  ];
+  const tooltip = (o: ReturnType<typeof baseOptions>, title: (label: string) => string) => ({
+    ...o.plugins,
+    tooltip: {
+      ...o.plugins.tooltip,
+      callbacks: {
+        title: (items: { label: string }[]) => title(items[0].label),
+        label: (item: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+          `${item.dataset.label}: ${item.parsed.y === null ? 'no value' : `${item.parsed.y.toFixed(2)} kWh`}`,
+      },
+    },
+  });
+
+  const dailyOpts = baseOptions((v) => `${v} kWh`);
+  render('chart-cmp-daily', {
+    type: 'line',
+    data: {
+      labels: daily.map((d) => d.key),
+      datasets: pair(daily.map((d) => d.csv), daily.map((d) => d.ha), daily.map((d) => d.ha - d.csv)),
+    },
+    options: {
+      ...dailyOpts,
+      plugins: tooltip(dailyOpts, (label) => `${fmtWeekdayDay(label)}/${label.slice(0, 4)} · click to inspect`),
+      scales: {
+        ...dailyOpts.scales,
+        x: {
+          ...dailyOpts.scales.x,
+          ticks: {
+            color: t.muted,
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 12,
+            callback(this: { getLabelForValue: (v: number) => string }, v: number | string) {
+              const label = this.getLabelForValue(Number(v));
+              return daily.length <= 120 ? fmtDayMonth(label) : fmtMonth(label);
+            },
+          },
+        },
+      },
+      onClick: (event, _active, chart) => {
+        if (!event.native) return;
+        const hit = chart.getElementsAtEventForMode(event.native, 'index', { intersect: false }, false);
+        if (hit.length > 0) onPickDay(daily[hit[0].index].key);
+      },
+    },
+  } as ChartConfiguration);
+
+  const dayOpts = baseOptions((v) => `${num1(v)} kWh`);
+  render('chart-cmp-day', {
+    type: 'line',
+    data: {
+      labels: day.map((h) => fmtTime(h.t)),
+      datasets: pair(
+        day.map((h) => h.csv),
+        day.map((h) => h.ha),
+        day.map((h) => (h.csv !== null && h.ha !== null ? h.ha - h.csv : null)),
+      ).map((d) => ({ ...d, pointRadius: 2 })),
+    },
+    options: {
+      ...dayOpts,
+      plugins: tooltip(dayOpts, (label) => label),
+      scales: { ...dayOpts.scales, x: { ...dayOpts.scales.x, ticks: { color: t.muted, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
     },
   } as ChartConfiguration);
 }

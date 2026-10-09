@@ -45,6 +45,9 @@ vitest. No backend besides a Vite plugin (below). Port 8050 (`strictPort`, `host
   - `homeassistant.ts` (WebSocket client), `derive.ts` (HA statistics → samples)
   - `merge.ts` — `appendHistory`: add Home Assistant hours after a CSV history, overlap check,
     T1/T2 pattern fill
+  - `compare.ts` — the Compare tab: Home Assistant statistics vs the picked meter CSV files, per meter
+    (grid import/export, solar, EV, water heater), over the period both cover; totals, hours off,
+    one-sided hours, hour-shift detection, daily/monthly pairs. Read-only, never changes the history
   - `validate.ts` — checks, monthly/daily totals, period helpers (last 12 months, 12-month windows)
   - `persist.ts` — compact dataset encoding, localStorage, and the client for the Pi store
 - `src/ui/` — `charts.ts`, `excel.ts`, `format.ts` (dates are DD/MMM/YYYY everywhere)
