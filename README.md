@@ -164,9 +164,21 @@ The overlapping week is compared, and a note warns if Home Assistant reads more 
 recent days, and keep Home Assistant's grid import/export. Repeat it whenever you want to bring the
 data up to date.
 
-The data is kept **in this browser only**, not on the Raspberry Pi: another device or browser starts
-empty, and clearing the browser's site data erases it. As a backup, use **Download all hourly data
-(CSV)**; that file loads back in the CSV files tab with everything (registers and grid totals included).
+### Where the history is kept
+
+When the app runs with `npm run preview` or `npm run dev` (as on the Raspberry Pi), the loaded
+history is saved **on that machine**, in `data/dataset.json` next to the app (or the folder in
+`MYBAT_DATA_DIR`), so every device on your network opens the same data. Each save keeps the version
+before it as `data/dataset.prev.json`. If another device changed the history since your page loaded,
+the app refuses to overwrite it and asks you to reload. Each browser also keeps a copy; the first time
+a browser finds the Pi empty, it uploads the history it already had. The demo data is never saved.
+
+Anyone who can open the app on your network can read and replace this history: fine at home, don't
+expose the port to the internet. Your Home Assistant token stays in your browser, never on the Pi.
+
+Served as static files (e.g. GitHub Pages), there is no server copy and the history lives in the
+browser only. Either way, **Download all hourly data (CSV)** makes a backup that loads back in the CSV
+files tab with everything (registers and grid totals included).
 
 ### No Home Assistant?
 

@@ -35,7 +35,7 @@ describe('Excel export', () => {
   });
 
   it('writes a valid .xlsx whose first hour shows local midnight', async () => {
-    const buffer = await writeXlsxFile(buildSheets(input())).toBuffer();
+    const buffer = await writeXlsxFile(buildSheets(input()) as never).toBuffer(); // browser Sheet<Blob> vs the node build's Blob type
     const files = unzipSync(new Uint8Array(buffer));
     const workbook = strFromU8(files['xl/workbook.xml']);
     for (const name of ['Summary', 'All sizes', 'Monthly', 'Hourly data']) expect(workbook).toContain(`name="${name}"`);

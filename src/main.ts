@@ -11,7 +11,7 @@ import { appendHistory, OVERLAP_HOURS } from './data/merge';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
 import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, twelveMonthsFrom, yearStarts, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
-import { clearDataset, loadDataset, saveDataset } from './data/persist';
+import { clearDataset, deleteRemoteDataset, fetchRemoteDataset, loadDataset, pushRemoteDataset, saveDataset, type SavedDataset } from './data/persist';
 import { renderBatteryCharts, renderCharts, renderDataCharts, renderMonthlyChart } from './ui/charts';
 import { exportExcel } from './ui/excel';
 import { dateRange, escapeHtml, fmtDate, fmtDateTime, fmtMonth, fmtTime, kwh, money, num1, pct, years } from './ui/format';
@@ -95,7 +95,23 @@ function applyPeriod() {
   renderMonthPrices();
 }
 
-function setData(samples: HourSample[], label: string, notes: string[] = [], restoredAt?: number) {
+/**
+ * Where the history is kept: 'pi' when the server stores it for every device (server/dataset-store.ts),
+ * 'browser' when the app is served without that (only localStorage), 'unknown' until checked.
+ */
+let storageMode: 'unknown' | 'pi' | 'browser' = 'unknown';
+/** savedAt of the version this browser last saw on the Pi (null: none there); guards against overwriting another device's save. */
+let piSavedAt: number | null = null;
+
+interface SetDataOptions {
+  /** Shown as restored rather than freshly loaded. */
+  restoredAt?: number;
+  restoredFrom?: 'the Pi' | 'this browser';
+  /** False for the demo: never saved, so it can't replace real history. */
+  persist?: boolean;
+}
+
+function setData(samples: HourSample[], label: string, notes: string[] = [], opts: SetDataOptions = {}) {
   if (samples.length < 24) {
     setStatus('Not enough data: at least one full day of hourly values is needed.', 'error');
     return;
@@ -104,13 +120,19 @@ function setData(samples: HourSample[], label: string, notes: string[] = [], res
   applyPeriod();
   dataNotes = notes;
   dataLabel = label;
-  // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
-  if (restoredAt !== undefined) {
-    setStatus(`Restored ${label}, loaded ${fmtDateTime(restoredAt)}. Add newer hours from Home Assistant, or load files to replace it.`, 'ok');
-  } else if (saveDataset({ samples, label, notes, savedAt: Date.now() })) {
-    setStatus(`Loaded ${label}. It stays here after a page refresh until you load new data.`, 'ok');
+  if (opts.restoredAt !== undefined) {
+    setStatus(
+      `Restored ${label} from ${opts.restoredFrom ?? 'this browser'}, saved ${fmtDateTime(opts.restoredAt)}. Add newer hours from Home Assistant, or load files to replace it.`,
+      'ok',
+    );
+  } else if (opts.persist === false) {
+    setStatus(`Loaded ${label}. Not saved, so your own history stays as it was; a refresh brings it back.`, 'ok');
   } else {
-    setStatus(`Loaded ${label}. Too large to keep in this browser, so a refresh will clear it.`, 'ok');
+    const dataset = { samples, label, notes, savedAt: Date.now() };
+    const local = saveDataset(dataset); // this browser's copy: works offline and when served without the Pi store
+    if (storageMode === 'pi') void saveOnPi(dataset);
+    else if (local) setStatus(`Loaded ${label}. Kept in this browser after a refresh until you load new data.`, 'ok');
+    else setStatus(`Loaded ${label}. Too large to keep in this browser, so a refresh will clear it.`, 'ok');
   }
   $('#data-forget').hidden = false;
   renderAppendHint();
@@ -119,9 +141,29 @@ function setData(samples: HourSample[], label: string, notes: string[] = [], res
   recompute();
 }
 
+/** Saves on the Pi for all devices, unless another device saved since this page loaded. */
+async function saveOnPi(dataset: SavedDataset) {
+  setStatus(`Loaded ${dataset.label}. Saving on the Pi…`, 'info');
+  const result = await pushRemoteDataset(dataset, piSavedAt);
+  if (result === 'ok') {
+    piSavedAt = dataset.savedAt;
+    setStatus(`Loaded ${dataset.label}. Saved on the Pi, so every device on your network sees it.`, 'ok');
+  } else if (result === 'conflict') {
+    setStatus(
+      'Not saved on the Pi: another device changed the history since this page loaded. Reload the page to get the latest, then load your data again.',
+      'error',
+    );
+  } else {
+    setStatus(`Loaded ${dataset.label}, but saving on the Pi failed, so it's only kept in this browser.`, 'error');
+  }
+}
+
 /** Shows the "add to loaded data" option for Home Assistant once something is loaded. */
+/** Home Assistant can add to what's loaded, unless it's the demo (which must never become saved history). */
+const canAppend = () => allSamples.length > 0 && dataLabel !== 'demo year';
+
 function renderAppendHint() {
-  const has = allSamples.length > 0;
+  const has = canAppend();
   $('#ha-append-wrap').hidden = !has;
   if (!has) return;
   const first = allSamples[0].t;
@@ -131,7 +173,7 @@ function renderAppendHint() {
     'it also reads the week before, only to check both sources agree. Untick to replace everything with the days set above.';
 }
 
-$('#demo-load').addEventListener('click', () => setData(demoYear(), 'demo year'));
+$('#demo-load').addEventListener('click', () => setData(demoYear(), 'demo year', [], { persist: false }));
 
 $('#csv-template').addEventListener('click', (e) => {
   e.preventDefault();
@@ -371,7 +413,7 @@ $('#ha-load').addEventListener('click', async () => {
   const end = new Date();
   end.setMinutes(0, 0, 0);
   // Appending: fetch from a week before the end of the loaded history (the overlap is only compared).
-  const append = allSamples.length > 0 && $<HTMLInputElement>('#ha-append').checked;
+  const append = canAppend() && $<HTMLInputElement>('#ha-append').checked;
   const historyEnd = allSamples.length ? allSamples[allSamples.length - 1].t : 0;
   const start = new Date(
     append ? Math.max(end.getTime() - 1825 * 24 * HOUR_MS, historyEnd - OVERLAP_HOURS * HOUR_MS) : end.getTime() - days * 24 * HOUR_MS,
@@ -1317,14 +1359,43 @@ $('#results-body').addEventListener('click', async (e) => {
 
 // ---------- restore the last loaded data ----------
 
-$('#data-forget').addEventListener('click', () => {
+$('#data-forget').addEventListener('click', async () => {
+  if (storageMode === 'pi') {
+    if (!confirm('Remove the saved history from the Pi, for every device? The Pi keeps the last version as dataset.prev.json.')) return;
+    if (!(await deleteRemoteDataset())) {
+      setStatus('Could not remove the history from the Pi.', 'error');
+      return;
+    }
+    piSavedAt = null;
+  }
   clearDataset();
   $('#data-forget').hidden = true;
-  setStatus('Saved data removed from this browser. It stays on screen until you refresh.', 'info');
+  setStatus(`Saved data removed from ${storageMode === 'pi' ? 'the Pi and this browser' : 'this browser'}. It stays on screen until you refresh.`, 'info');
 });
 
-const saved = loadDataset();
-if (saved) setData(saved.samples, saved.label, saved.notes, saved.savedAt);
+/**
+ * Startup: the Pi's copy wins when it's at least as new as this browser's. A newer browser copy (or
+ * one the Pi doesn't have yet, e.g. history loaded before the Pi stored anything) is uploaded.
+ */
+async function restore() {
+  const local = loadDataset();
+  const remote = await fetchRemoteDataset();
+  storageMode = remote.available ? 'pi' : 'browser';
+  if (!remote.available) {
+    if (local) setData(local.samples, local.label, local.notes, { restoredAt: local.savedAt, restoredFrom: 'this browser' });
+    return;
+  }
+  const pi = remote.dataset;
+  piSavedAt = pi?.savedAt ?? null;
+  if (pi && (!local || pi.savedAt >= local.savedAt)) {
+    saveDataset(pi);
+    setData(pi.samples, pi.label, pi.notes, { restoredAt: pi.savedAt, restoredFrom: 'the Pi' });
+  } else if (local) {
+    setData(local.samples, local.label, local.notes, { restoredAt: local.savedAt, restoredFrom: 'this browser' });
+    if (local.label !== 'demo year') void saveOnPi(local);
+  }
+}
+void restore();
 
 // ---------- date fields shown as DD/MMM/YYYY ----------
 // A native date input always displays in the browser's regional format, so it stays hidden and a

@@ -16,6 +16,7 @@
     "write-excel-file": "^4.1.1"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "fflate": "^0.8.3",
     "typescript": "~5.9.3",
     "vite": "^8.3.2",

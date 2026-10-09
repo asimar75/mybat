@@ -3,7 +3,8 @@ dist
 *.log
 .DS_Store
 
-# Personal data must never be committed: exports from the app, spreadsheets, secrets.
+# Personal data must never be committed: the history stored by the app, exports, spreadsheets, secrets.
+/data/
 *.csv
 *.tsv
 *.xlsx
