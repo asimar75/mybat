@@ -59,14 +59,14 @@ describe('deriveSamples', () => {
       ev: 'sensor.ev',
     });
     // 2 − 1 + 4 + 0.5 − 1.5 = 4 total; minus 2.5 EV
-    expect(r.samples[0]).toEqual({ t, solar: 4, ev: 2.5, house: 1.5 });
+    expect(r.samples[0]).toEqual({ t, solar: 4, ev: 2.5, house: 1.5, gridIn: 2, gridOut: 1 });
   });
 
   it('subtracts a separately metered water heater', () => {
     const t = Date.UTC(2025, 0, 1, 3);
     const stats = { g: [{ start: t, change: 2 }], w: [{ start: t, change: 1.5 }] };
     const r = deriveSamples(stats, { gridImport: ['g'], gridExport: [], solar: [], batteryOut: [], batteryIn: [], ev: '', wh: 'w' });
-    expect(r.samples[0]).toEqual({ t, solar: 0, ev: 0, wh: 1.5, house: 0.5 });
+    expect(r.samples[0]).toEqual({ t, solar: 0, ev: 0, wh: 1.5, house: 0.5, gridIn: 2, gridOut: 0 });
   });
 
   it('reports gaps and accepts ISO or seconds timestamps', () => {

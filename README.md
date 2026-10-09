@@ -154,6 +154,20 @@ year): the app uses the last 12 months by default so each season counts once. In
 switch to any 12 calendar months, e.g. Aug–Jul to match the HomeWizard year view exactly, or to the
 whole period. Download every meter for the same period, or the shortest file sets the range.
 
+### CSV history + Home Assistant updates
+
+Load the HomeWizard CSV history once, then use **Load history** in the Home Assistant tab with
+**Add to the data already loaded** ticked (the default once data is loaded). It fetches from a week
+before the end of what's loaded until now and adds only the new hours; the loaded hours are kept.
+The overlapping week is compared, and a note warns if Home Assistant reads more than 5 % differently
+(different sensors?). Added hours get the T1/T2 register your meter used at that hour on similar
+recent days, and keep Home Assistant's grid import/export. Repeat it whenever you want to bring the
+data up to date.
+
+The data is kept **in this browser only**, not on the Raspberry Pi: another device or browser starts
+empty, and clearing the browser's site data erases it. As a backup, use **Download all hourly data
+(CSV)**; that file loads back in the CSV files tab with everything (registers and grid totals included).
+
 ### No Home Assistant?
 
 Use the **CSV files** tab with one file in this app's own format. Columns: `timestamp`, `consumption_kwh` (total incl. EV) **or**

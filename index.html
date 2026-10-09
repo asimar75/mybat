@@ -146,6 +146,10 @@
               <label>Existing battery — discharge <input id="map-bo" list="ha-stats" placeholder="none" /></label>
               <label>Existing battery — charge <input id="map-bi" list="ha-stats" placeholder="none" /></label>
             </div>
+            <div id="ha-append-wrap" hidden>
+              <label class="check"><input id="ha-append" type="checkbox" checked /> Add to the data already loaded (keeps your history)</label>
+              <p id="ha-append-hint" class="hint" style="margin:0"></p>
+            </div>
             <div class="actions inline">
               <button id="ha-load" class="primary">Load history</button>
               <button id="sensors-reset" class="link-btn" type="button">Reset to Energy dashboard</button>
