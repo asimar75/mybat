@@ -6,7 +6,8 @@ import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/s
 import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
 import { CSV_TEMPLATE, parseCsv } from './data/csv';
 import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole, type ParsedMeter } from './data/meters';
-import { deriveSamples, type StatSelection } from './data/derive';
+import { deriveSamples, HOUR_MS, type StatSelection } from './data/derive';
+import { appendHistory, OVERLAP_HOURS } from './data/merge';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
 import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, twelveMonthsFrom, yearStarts, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
@@ -105,16 +106,29 @@ function setData(samples: HourSample[], label: string, notes: string[] = [], res
   dataLabel = label;
   // Keep the dataset in this browser so a refresh doesn't lose it; it's replaced by the next load.
   if (restoredAt !== undefined) {
-    setStatus(`Restored ${label}, loaded ${fmtDateTime(restoredAt)}. Load new data to replace it.`, 'ok');
+    setStatus(`Restored ${label}, loaded ${fmtDateTime(restoredAt)}. Add newer hours from Home Assistant, or load files to replace it.`, 'ok');
   } else if (saveDataset({ samples, label, notes, savedAt: Date.now() })) {
     setStatus(`Loaded ${label}. It stays here after a page refresh until you load new data.`, 'ok');
   } else {
     setStatus(`Loaded ${label}. Too large to keep in this browser, so a refresh will clear it.`, 'ok');
   }
   $('#data-forget').hidden = false;
+  renderAppendHint();
   renderSummary();
   renderValidation();
   recompute();
+}
+
+/** Shows the "add to loaded data" option for Home Assistant once something is loaded. */
+function renderAppendHint() {
+  const has = allSamples.length > 0;
+  $('#ha-append-wrap').hidden = !has;
+  if (!has) return;
+  const first = allSamples[0].t;
+  const last = allSamples[allSamples.length - 1].t;
+  $('#ha-append-hint').textContent =
+    `Loaded: ${dateRange(first, last)}. Home Assistant then adds the hours after ${fmtDate(last)}; ` +
+    'it also reads the week before, only to check both sources agree. Untick to replace everything with the days set above.';
 }
 
 $('#demo-load').addEventListener('click', () => setData(demoYear(), 'demo year'));
@@ -356,7 +370,17 @@ $('#ha-load').addEventListener('click', async () => {
   const days = Math.max(7, Math.min(1825, Number(haDays.value) || 365));
   const end = new Date();
   end.setMinutes(0, 0, 0);
-  const start = new Date(end.getTime() - days * 24 * 3600 * 1000);
+  // Appending: fetch from a week before the end of the loaded history (the overlap is only compared).
+  const append = allSamples.length > 0 && $<HTMLInputElement>('#ha-append').checked;
+  const historyEnd = allSamples.length ? allSamples[allSamples.length - 1].t : 0;
+  const start = new Date(
+    append ? Math.max(end.getTime() - 1825 * 24 * HOUR_MS, historyEnd - OVERLAP_HOURS * HOUR_MS) : end.getTime() - days * 24 * HOUR_MS,
+  );
+  if (append && start.getTime() >= end.getTime()) {
+    setStatus('Nothing to add: the loaded data already runs up to now.', 'ok');
+    button.disabled = false;
+    return;
+  }
   try {
     const stats = await ha.hourlyChanges(ids, start, end, (f) => setStatus(`Downloading history… ${Math.round(f * 100)} %`));
     const report = deriveSamples(stats, sel);
@@ -366,7 +390,33 @@ $('#ha-load').addEventListener('click', async () => {
     if (!sel.ev) notes.push('No EV charger selected: all consumption is treated as household load.');
     if (report.whClampedHours > 0) notes.push(`In ${report.whClampedHours} hours the water heater meter read more than the remaining consumption — check that its sensor is an energy (kWh) total.`);
     if (sel.solar.length === 0) notes.push('No solar sensor selected: the battery can only help through off-peak grid charging.');
-    setData(report.samples, `${days} days from Home Assistant`, notes);
+    if (!append) {
+      setData(report.samples, `${days} days from Home Assistant`, notes);
+      return;
+    }
+    const m = appendHistory(allSamples, report.samples);
+    if (m.added === 0) {
+      setStatus(`Nothing new from Home Assistant after ${fmtDateTime(historyEnd)}.`, 'ok');
+      return;
+    }
+    const haNotes: string[] = [`Home Assistant: added ${m.added.toLocaleString()} hours, ${dateRange(m.firstAdded!, m.lastAdded!)}, after the loaded history.`];
+    if (m.gapHours > 0) haNotes.push(`Home Assistant: ${m.gapHours.toLocaleString()} hours between the history and the new data have no values.`);
+    const off = (r: number | null) => (r !== null && Math.abs(r - 1) > 0.05 ? `${r > 1 ? '+' : ''}${Math.round((r - 1) * 100)} %` : null);
+    const useOff = off(m.useRatio);
+    const solarOff = off(m.solarRatio);
+    if (useOff || solarOff) {
+      haNotes.push(
+        `Home Assistant: over the ${m.overlap} hours both sources cover, it reads ${[useOff && `total use ${useOff}`, solarOff && `solar ${solarOff}`].filter(Boolean).join(' and ')} ` +
+          'compared with the loaded history. Check that the sensors are the same meters; the history is kept for those hours.',
+      );
+    } else if (m.useRatio !== null) {
+      haNotes.push(`Home Assistant: matches the loaded history within 5 % over the ${m.overlap} hours both cover.`);
+    }
+    if (m.registersFilled > 0) haNotes.push(`Home Assistant: ${m.registersFilled.toLocaleString()} added hours took the T1/T2 register your meter used at that hour on similar recent days.`);
+    if (!sel.ev && allSamples.some((x) => x.ev > 0)) haNotes.push('Home Assistant: no EV charger selected, so EV charging in the added hours counts as household use.');
+    const kept = dataNotes.filter((n) => !n.startsWith('Home Assistant:'));
+    const base = dataLabel.replace(/ \+ Home Assistant to .*$/, '');
+    setData(m.samples, `${base} + Home Assistant to ${fmtDate(m.lastAdded!)}`, [...kept, ...haNotes, ...notes.map((n) => `Home Assistant: ${n}`)]);
   } catch (err) {
     setStatus((err as Error).message, 'error');
   } finally {
@@ -898,14 +948,14 @@ function renderLive(rec: Recommendation, currency: string, lifetime: number) {
   if (best) {
     $('#live').innerHTML =
       `<span class="live-main live-good">Best value: ${best.nominalKwh} kWh</span><br>` +
-      `<span class="live-sub">Payback ${years(best.paybackYears)} · saves ${money(best.annualSavings, currency)}/yr · ` +
+      `<span class="live-sub">Payback ${years(best.paybackYears)}${lastCfg?.economics.discountRate ? ` (${years(best.discountedPaybackYears)} discounted)` : ''} · saves ${money(best.annualSavings, currency)}/yr · ` +
       `${money(best.netBenefit, currency)} net over ${lifetime} yrs</span>${tail}`;
     return;
   }
   const fastest = rec.rows.filter((r) => r.nominalKwh > 0).sort((x, y) => x.paybackYears - y.paybackYears)[0];
   $('#live').innerHTML =
     `<span class="live-main live-bad">No size pays back in ${lifetime} yrs</span><br>` +
-    `<span class="live-sub">Fastest: ${fastest ? `${fastest.nominalKwh} kWh at ${years(fastest.paybackYears)}` : '—'}</span>${tail}`;
+    `<span class="live-sub">Fastest: ${fastest ? `${fastest.nominalKwh} kWh at ${years(fastest.paybackYears)}${lastCfg?.economics.discountRate ? ` (${years(fastest.discountedPaybackYears)} discounted)` : ''}` : '—'}</span>${tail}`;
 }
 
 $('#panel-toggle').addEventListener('click', () => {

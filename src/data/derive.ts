@@ -72,11 +72,13 @@ export function deriveSamples(stats: Record<string, StatisticPoint[]>, sel: Stat
     let evKwh = ev.get(t) ?? 0;
     if (evKwh > consumption + 0.05) evClampedHours++;
     evKwh = Math.min(evKwh, consumption);
-    if (!wh) return { t, solar, ev: evKwh, house: consumption - evKwh };
+    // Grid import/export as the meter counted them (not netted), like a meter CSV gives them.
+    const grid = gi.length ? { gridIn: total(gi, t), gridOut: total(ge, t) } : {};
+    if (!wh) return { t, solar, ev: evKwh, house: consumption - evKwh, ...grid };
     let whKwh = wh.get(t) ?? 0;
     if (whKwh > consumption - evKwh + 0.05) whClampedHours++;
     whKwh = Math.min(whKwh, consumption - evKwh);
-    return { t, solar, ev: evKwh, wh: whKwh, house: consumption - evKwh - whKwh };
+    return { t, solar, ev: evKwh, wh: whKwh, house: consumption - evKwh - whKwh, ...grid };
   });
 
   return { samples, missingHours: Math.max(0, span - sorted.length), evClampedHours, whClampedHours };
