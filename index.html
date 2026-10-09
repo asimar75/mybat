@@ -106,6 +106,7 @@
           <button role="tab" data-tab="ha" aria-selected="true">Home Assistant</button>
           <button role="tab" data-tab="csv" aria-selected="false">CSV files</button>
           <button role="tab" data-tab="demo" aria-selected="false">Demo data</button>
+          <button role="tab" data-tab="compare" aria-selected="false" title="Compare Home Assistant with the CSV files">Compare</button>
         </div>
 
         <div class="tab-panel" data-panel="ha">
@@ -187,6 +188,19 @@
             Use it to learn the tool before connecting your own data.
           </p>
           <div class="actions"><button id="demo-load" class="primary">Load demo year</button></div>
+        </div>
+
+        <div class="tab-panel" data-panel="compare" hidden>
+          <p class="hint">
+            Checks that Home Assistant and your meter CSV files recorded the same energy, meter by meter, over only the
+            hours both have. Nothing is loaded or saved here: the history used for the result stays as it is.
+          </p>
+          <ul id="cmp-ready" class="checks"></ul>
+          <div class="actions inline">
+            <button id="cmp-run" class="primary" type="button" disabled>Compare</button>
+            <p id="cmp-status" class="status" style="margin:0" role="status" aria-live="polite"></p>
+          </div>
+          <div id="cmp-result"></div>
         </div>
 
         <div class="actions inline" style="margin-top:14px">
