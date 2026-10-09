@@ -115,3 +115,48 @@ export function clearDataset() {
     /* storage unavailable */
   }
 }
+
+// ---------- shared copy on the machine serving the app (see server/dataset-store.ts) ----------
+
+const REMOTE = 'api/dataset';
+
+/** What the server holds: unavailable when the app is served without the store (e.g. static hosting). */
+export type RemoteDataset = { available: false } | { available: true; dataset: SavedDataset | null };
+
+export async function fetchRemoteDataset(): Promise<RemoteDataset> {
+  try {
+    const r = await fetch(REMOTE, { cache: 'no-store' });
+    if (r.status === 204) return { available: true, dataset: null };
+    // A static server answers with its index page or a 404, never with JSON.
+    if (!r.ok || !(r.headers.get('content-type') ?? '').includes('application/json')) return { available: false };
+    return { available: true, dataset: decodeDataset(await r.text()) };
+  } catch {
+    return { available: false };
+  }
+}
+
+/**
+ * Saves the dataset on the server. `base` is the savedAt this browser last saw there (null for none):
+ * the server refuses ('conflict') when another device saved something since.
+ */
+export async function pushRemoteDataset(d: SavedDataset, base: number | null): Promise<'ok' | 'conflict' | 'failed'> {
+  try {
+    const r = await fetch(REMOTE, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Base-Saved-At': base === null ? 'none' : String(base) },
+      body: encodeDataset(d),
+    });
+    if (r.ok) return 'ok';
+    return r.status === 409 ? 'conflict' : 'failed';
+  } catch {
+    return 'failed';
+  }
+}
+
+export async function deleteRemoteDataset(): Promise<boolean> {
+  try {
+    return (await fetch(REMOTE, { method: 'DELETE' })).ok;
+  } catch {
+    return false;
+  }
+}
