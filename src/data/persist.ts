@@ -160,3 +160,34 @@ export async function deleteRemoteDataset(): Promise<boolean> {
     return false;
   }
 }
+
+/** Settings every device shares: raw localStorage values by key, with when they last changed. */
+export interface SharedSettings {
+  v: 1;
+  savedAt: number;
+  values: Record<string, string | null>;
+}
+
+const SETTINGS_REMOTE = 'api/settings';
+
+/** The server's settings, null when it has none, undefined when the app is served without the store. */
+export async function fetchRemoteSettings(): Promise<SharedSettings | null | undefined> {
+  try {
+    const r = await fetch(SETTINGS_REMOTE, { cache: 'no-store' });
+    if (r.status === 204) return null;
+    if (!r.ok || !(r.headers.get('content-type') ?? '').includes('application/json')) return undefined;
+    const s = (await r.json()) as SharedSettings;
+    return s?.v === 1 && typeof s.savedAt === 'number' && s.values ? s : null;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function pushRemoteSettings(s: SharedSettings): Promise<boolean> {
+  try {
+    const r = await fetch(SETTINGS_REMOTE, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}

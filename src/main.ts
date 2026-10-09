@@ -11,7 +11,7 @@ import { appendHistory, OVERLAP_HOURS } from './data/merge';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
 import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, twelveMonthsFrom, yearStarts, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
-import { clearDataset, deleteRemoteDataset, fetchRemoteDataset, loadDataset, pushRemoteDataset, saveDataset, type SavedDataset } from './data/persist';
+import { clearDataset, deleteRemoteDataset, fetchRemoteDataset, fetchRemoteSettings, loadDataset, pushRemoteDataset, pushRemoteSettings, saveDataset, type SavedDataset, type SharedSettings } from './data/persist';
 import { renderBatteryCharts, renderCharts, renderDataCharts, renderMonthlyChart } from './ui/charts';
 import { exportExcel } from './ui/excel';
 import { dateRange, escapeHtml, fmtDate, fmtDateTime, fmtMonth, fmtTime, kwh, money, num1, pct, years } from './ui/format';
@@ -35,8 +35,59 @@ const storage = {
     } catch {
       /* storage unavailable (private mode) — settings just won't persist */
     }
+    if (SHARED_KEYS.includes(key)) sharedSettingsChanged();
   },
 };
+
+// ---------- settings shared through the Pi ----------
+// Everything that changes the result is the same on every device: the assumptions, the period used
+// and the monthly reimbursement prices. Device-only things (Home Assistant URL and token, open tab,
+// compared sizes) stay in each browser. The most recently changed settings win.
+
+const SHARED_KEYS = ['mybat.settings', 'mybat.period', 'mybat.reimbMonths'];
+const SHARED_AT_KEY = 'mybat.sharedSavedAt';
+/** True once the Pi is known to store settings. */
+let sharingSettings = false;
+let applyingShared = false;
+let sharedPushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function sharedSnapshot(): SharedSettings {
+  return {
+    v: 1,
+    savedAt: Number(storage.get(SHARED_AT_KEY)) || Date.now(),
+    values: Object.fromEntries(SHARED_KEYS.map((k) => [k, storage.get(k)])),
+  };
+}
+
+function sharedSettingsChanged() {
+  if (applyingShared) return;
+  storage.set(SHARED_AT_KEY, String(Date.now()));
+  if (!sharingSettings) return;
+  // Typing in a field changes settings on every keystroke: send once things settle.
+  clearTimeout(sharedPushTimer);
+  sharedPushTimer = setTimeout(() => void pushRemoteSettings(sharedSnapshot()), 800);
+}
+
+/** Takes the Pi's settings into this browser and the form. */
+function applySharedSettings(s: SharedSettings) {
+  applyingShared = true;
+  for (const k of SHARED_KEYS) storage.set(k, s.values[k] ?? null);
+  storage.set(SHARED_AT_KEY, String(s.savedAt));
+  applyingShared = false;
+  restoreSettings();
+  syncVisibility();
+}
+
+/** At startup: the newer of the Pi's and this browser's settings wins; a newer local copy is uploaded. */
+async function syncSharedSettings() {
+  const remote = await fetchRemoteSettings();
+  if (remote === undefined) return; // served without the Pi store: settings stay per browser
+  sharingSettings = true;
+  const localAt = Number(storage.get(SHARED_AT_KEY)) || 0;
+  const hasLocal = SHARED_KEYS.some((k) => storage.get(k) !== null);
+  if (remote && remote.savedAt >= localAt) applySharedSettings(remote);
+  else if (hasLocal) await pushRemoteSettings(sharedSnapshot());
+}
 
 function setStatus(msg: string, kind: 'info' | 'error' | 'ok' = 'info') {
   const el = $('#status');
@@ -1378,8 +1429,9 @@ $('#data-forget').addEventListener('click', async () => {
  * one the Pi doesn't have yet, e.g. history loaded before the Pi stored anything) is uploaded.
  */
 async function restore() {
+  // Settings first, so the restored data is computed with the shared assumptions.
+  const [remote] = await Promise.all([fetchRemoteDataset(), syncSharedSettings()]);
   const local = loadDataset();
-  const remote = await fetchRemoteDataset();
   storageMode = remote.available ? 'pi' : 'browser';
   if (!remote.available) {
     if (local) setData(local.samples, local.label, local.notes, { restoredAt: local.savedAt, restoredFrom: 'this browser' });

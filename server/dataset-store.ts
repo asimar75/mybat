@@ -4,22 +4,44 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 
 /**
- * Keeps the loaded history on the machine that serves the app (e.g. the Raspberry Pi), so every
- * device on the network sees the same data. One file, `dataset.json`, in the same compact format the
- * browser uses; the version before each save or delete is kept as `dataset.prev.json`.
+ * Keeps the loaded history and the shared settings on the machine that serves the app (e.g. the
+ * Raspberry Pi), so every device on the network sees the same data and assumptions. Each is one JSON
+ * file; the version before each save or delete is kept as `<name>.prev.json`.
  *
  * GET returns it (204 when there is none), PUT replaces it, DELETE removes it. A PUT that carries
  * `X-Base-Saved-At` (the version the browser last saw, or "none") is refused with 409 when the stored
  * version differs, so one device can't silently overwrite what another just added.
  */
 export const API_PATH = '/api/dataset';
+export const SETTINGS_PATH = '/api/settings';
 const MAX_BYTES = 50 * 1024 * 1024;
 
 type Next = (err?: unknown) => void;
 
+/** The history: the browser's compact dataset format (v1, hours array). */
 export function datasetStore(dir: string) {
-  const file = join(dir, 'dataset.json');
-  const prev = join(dir, 'dataset.prev.json');
+  return jsonFileStore(dir, 'dataset', API_PATH, (d) => d?.v === 1 && Array.isArray(d.h));
+}
+
+/** Settings shared by all devices: the assumptions, chosen period and monthly reimbursement prices. */
+export function settingsStore(dir: string) {
+  return jsonFileStore(dir, 'settings', SETTINGS_PATH, (d) => d?.v === 1 && typeof d.values === 'object' && d.values !== null);
+}
+
+/** Validates the parsed body beyond having a numeric savedAt. */
+type Check = (parsed: { v?: unknown; h?: unknown; values?: unknown } | null) => boolean;
+
+function jsonFileStore(dir: string, name: string, path: string, isValid: Check) {
+  const file = join(dir, `${name}.json`);
+  const prev = join(dir, `${name}.prev.json`);
+  const savedAtOf = (text: string): number | null => {
+    try {
+      const d = JSON.parse(text);
+      return isValid(d) && typeof d.savedAt === 'number' ? d.savedAt : null;
+    } catch {
+      return null;
+    }
+  };
   const read = async () => {
     try {
       return await readFile(file, 'utf8');
@@ -32,7 +54,7 @@ export function datasetStore(dir: string) {
   };
 
   return async function handle(req: IncomingMessage, res: ServerResponse, next: Next) {
-    if ((req.url ?? '').split('?')[0] !== API_PATH) return next();
+    if ((req.url ?? '').split('?')[0] !== path) return next();
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (req.method === 'GET') {
@@ -45,7 +67,7 @@ export function datasetStore(dir: string) {
         const body = await readBody(req);
         if (body === null) return send(res, 413, 'Too large');
         const savedAt = savedAtOf(body);
-        if (savedAt === null) return send(res, 400, 'Not a dataset');
+        if (savedAt === null) return send(res, 400, `Not ${name} data`);
         const current = await read();
         const base = req.headers['x-base-saved-at'];
         if (typeof base === 'string') {
@@ -78,16 +100,6 @@ export function datasetStore(dir: string) {
 function send(res: ServerResponse, status: number, body?: string) {
   res.statusCode = status;
   res.end(body);
-}
-
-/** The dataset's savedAt, or null when the text isn't one (checked lightly: format v1 with hours). */
-function savedAtOf(text: string): number | null {
-  try {
-    const d = JSON.parse(text);
-    return d?.v === 1 && Array.isArray(d.h) && typeof d.savedAt === 'number' ? d.savedAt : null;
-  } catch {
-    return null;
-  }
 }
 
 /** The request body as text, or null when it's over MAX_BYTES. */

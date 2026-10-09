@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { API_PATH, datasetStore } from './dataset-store';
+import { API_PATH, datasetStore, SETTINGS_PATH, settingsStore } from './dataset-store';
 
 const dataset = (savedAt: number) => JSON.stringify({ v: 1, label: 'x', notes: [], savedAt, t0: 0, h: [0], house: [1], ev: [0], solar: [0] });
 
@@ -16,8 +16,9 @@ describe('dataset store', () => {
 
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), 'mybat-'));
-    const handle = datasetStore(join(dir, 'data'));
-    server = createServer((req, res) => void handle(req, res, () => ((res.statusCode = 404), res.end('next'))));
+    const data = datasetStore(join(dir, 'data'));
+    const settings = settingsStore(join(dir, 'data'));
+    server = createServer((req, res) => void data(req, res, () => void settings(req, res, () => ((res.statusCode = 404), res.end('next')))));
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     url = `http://127.0.0.1:${(server.address() as AddressInfo).port}${API_PATH}`;
   });
@@ -53,6 +54,16 @@ describe('dataset store', () => {
     expect((await fetch(url, { method: 'DELETE' })).status).toBe(204);
     expect((await fetch(url)).status).toBe(204);
     expect(JSON.parse(await readFile(join(dir, 'data', 'dataset.prev.json'), 'utf8')).savedAt).toBe(200);
+  });
+
+  it('stores the shared settings next to the history, last write wins', async () => {
+    const settingsUrl = url.replace(API_PATH, SETTINGS_PATH);
+    const body = (savedAt: number, price: string) => JSON.stringify({ v: 1, savedAt, values: { 'mybat.settings': `{"exportPrice":"${price}"}` } });
+    expect((await fetch(settingsUrl)).status).toBe(204);
+    expect((await fetch(settingsUrl, { method: 'PUT', body: body(1, '0.08') })).status).toBe(204);
+    expect((await fetch(settingsUrl, { method: 'PUT', body: body(2, '0.02') })).status).toBe(204);
+    expect((await (await fetch(settingsUrl)).json()).values['mybat.settings']).toContain('0.02');
+    expect((await fetch(settingsUrl, { method: 'PUT', body: dataset(3) })).status).toBe(400); // a dataset isn't settings
   });
 
   it('leaves other paths to the next handler', async () => {
