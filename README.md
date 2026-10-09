@@ -173,6 +173,12 @@ before it as `data/dataset.prev.json`. If another device changed the history sin
 the app refuses to overwrite it and asks you to reload. Each browser also keeps a copy; the first time
 a browser finds the Pi empty, it uploads the history it already had. The demo data is never saved.
 
+The **settings that change the result** are shared the same way (`data/settings.json`): all the
+assumptions in the side panel, the period used and the monthly reimbursement prices, so every device
+computes the same recommendation. The most recently changed settings win; another device picks up
+a change when its page is reloaded. Device-only things stay in each browser: the Home Assistant
+address and token, the open tab and the sizes ticked for comparison.
+
 Anyone who can open the app on your network can read and replace this history: fine at home, don't
 expose the port to the internet. Your Home Assistant token stays in your browser, never on the Pi.
 

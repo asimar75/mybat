@@ -1,17 +1,18 @@
 import { join } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
-import { datasetStore } from './server/dataset-store';
+import { datasetStore, settingsStore } from './server/dataset-store.ts';
 
 /**
- * Stores the loaded history on the machine running the app (e.g. the Raspberry Pi), so all devices
- * share it. Files go to MYBAT_DATA_DIR, or ./data next to the app (git-ignored).
+ * Stores the loaded history and the settings on the machine running the app (e.g. the Raspberry Pi),
+ * so all devices share them. Files go to MYBAT_DATA_DIR, or ./data next to the app (git-ignored).
  */
 function datasetStorePlugin(): Plugin {
-  const handler = datasetStore(process.env.MYBAT_DATA_DIR ?? join(process.cwd(), 'data'));
+  const dir = process.env.MYBAT_DATA_DIR ?? join(process.cwd(), 'data');
+  const handlers = [datasetStore(dir), settingsStore(dir)];
   return {
     name: 'mybat-dataset-store',
-    configureServer: (server) => void server.middlewares.use(handler),
-    configurePreviewServer: (server) => void server.middlewares.use(handler),
+    configureServer: (server) => handlers.forEach((h) => server.middlewares.use(h)),
+    configurePreviewServer: (server) => handlers.forEach((h) => server.middlewares.use(h)),
   };
 }
 
