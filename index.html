@@ -26,14 +26,21 @@
             <label data-flat>Import price per kWh <input name="importFlat" type="number" step="0.01" min="0" value="0.30" /></label>
             <label data-tou>Peak price per kWh <input name="importPeak" type="number" step="0.01" min="0" value="0.36" /></label>
             <label data-tou>Off-peak price per kWh <input name="importOffPeak" type="number" step="0.01" min="0" value="0.20" /></label>
-            <label class="check" data-tou data-registers><input name="useMeterRegisters" type="checkbox" checked /> Use my meter's T1/T2 registers for peak hours</label>
-            <label data-tou data-registers>Peak register
+            <label data-tou data-registers>Peak hours
+              <select name="registerMode">
+                <option value="current">My meter's current T1/T2 hours, for the whole period</option>
+                <option value="billed">My meter's T1/T2 register, each hour as it was counted</option>
+                <option value="window">A fixed daily window</option>
+              </select>
+            </label>
+            <label data-tou data-registers data-regpeak>Peak register
               <select name="peakRegister"><option value="1">T1 is peak (expensive)</option><option value="2">T2 is peak (expensive)</option></select>
             </label>
-            <p class="hint" data-tou data-registers style="margin:0">Each hour is priced by the register your meter counted it on, so schedule changes during the year are followed.</p>
+            <p class="hint" data-tou data-registers style="margin:0">"Current hours" prices every hour by the register your meter uses at that time of day now (its last 8 weeks, weekdays and weekends apart): that's what a battery bought now will face. In Wallonia the off-peak hours changed on 1 Jan 2026 to 11–17 and 22–7, every day. "As counted" prices each hour as it was billed then.</p>
             <label data-tou data-window>Peak starts (hour) <input name="peakStartHour" type="number" min="0" max="23" value="7" /></label>
             <label data-tou data-window>Peak ends (hour) <input name="peakEndHour" type="number" min="0" max="24" value="23" /></label>
             <label>Export (feed-in) price per kWh <input name="exportPrice" type="number" step="0.01" min="0" value="0.08" /></label>
+            <p class="hint" style="margin:0">Import and export are counted separately here. While a meter still runs backwards (in Wallonia until 31/Dec/2030 for panels from before 2024) a battery saves almost nothing, so read the results as the years after that.</p>
           </fieldset>
           <fieldset>
             <legend>Battery &amp; cost</legend>

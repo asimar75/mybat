@@ -137,10 +137,14 @@ solar, the EV charger, a water heater… In the **CSV files** tab, select all of
   shorter EV or water-heater file never cuts it: its missing hours count as 0 (e.g. a charger
   switched off), so total use stays right
 
-If the grid meter has **T1/T2 registers**, each hour is priced as peak or off-peak from the register
-it was counted on (Assumptions → Tariff → time-of-use). That follows schedule changes during the
-year, which a fixed peak window can't. The register that counts weekday daytime is preselected as
-peak, since conventions differ by country (in the Netherlands T1 is usually the cheap one).
+If the grid meter has **T1/T2 registers**, each hour is priced as peak or off-peak from them
+(Assumptions → Tariff → time-of-use → Peak hours). By default every hour gets the register the
+meter uses at that time of day *now* (its last 8 weeks, weekdays and weekends apart), because a
+battery bought now faces today's schedule: in Wallonia the off-peak hours changed on 1 Jan 2026 to
+11–17 and 22–7 every day, so a history from 2025 would otherwise be priced on the old hours. "As
+counted" prices each hour by the register it was billed on then; a fixed daily window is the third
+option. The register that counts weekday daytime is preselected as peak, since conventions differ
+by country (in the Netherlands T1 is usually the cheap one).
 
 **Why the totals can differ from the HomeWizard app.** The summary and the monthly table show the
 grid meter's own import and export, which match the app. The simulation works hour by hour, so

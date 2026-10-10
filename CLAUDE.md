@@ -67,9 +67,10 @@ vitest. No backend besides a Vite plugin (below). Port 8050 (`strictPort`, `host
 - Match the surrounding style: short comments that say *why*, plain-language UI text (the owner and
   their family read it), DD/MMM/YYYY dates, € amounts via `money()`.
 - Explain results honestly: say when a number depends on placeholder assumptions (prices, battery
-  quote, export price). Belgium: import and export are metered separately (no net metering), and
-  in Flanders part of the grid fee depends on the monthly 15-minute power peak (capacity tariff),
-  which the app doesn't model yet.
+  quote, export price). The household is in Wallonia: its meter runs backwards (compensation)
+  until 31 Dec 2030, so a battery only pays after that; the owner decides on a size around 2029.
+  The app models the years after compensation (import and export counted separately). Off-peak
+  hours since 1 Jan 2026: 11–17 and 22–7 every day. No capacity tariff (that's Flanders).
 
 ## Git workflow
 

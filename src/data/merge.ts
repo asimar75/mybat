@@ -73,6 +73,21 @@ export function appendHistory(history: HourSample[], fresh: HourSample[]): Merge
   };
 }
 
+/**
+ * Gives every hour the register the meter uses at that hour today (the history's last eight weeks,
+ * weekdays and weekends apart), so older hours are priced by the current schedule. A battery bought
+ * now faces today's schedule, not the one an old hour was billed on (Wallonia moved its off-peak
+ * hours on 1 Jan 2026). Hours with no match keep their own register.
+ */
+export function withCurrentRegisters(samples: HourSample[], history: HourSample[] = samples): HourSample[] {
+  const pattern = registerPattern(history);
+  if (!pattern) return samples;
+  return samples.map((s) => {
+    const rate = pattern.get(slot(s.t));
+    return rate && rate !== s.rate ? { ...s, rate } : s;
+  });
+}
+
 /** "weekday-14" / "weekend-14" for a timestamp, in local time. */
 function slot(t: number): string {
   const d = new Date(t);
