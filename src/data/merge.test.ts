@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HourSample } from '../engine/types';
-import { appendHistory } from './merge';
+import { appendHistory, withCurrentRegisters } from './merge';
 
 const H = 3600_000;
 const t0 = new Date(2026, 8, 1, 0).getTime(); // Tue 1 Sep 2026, local midnight
@@ -48,5 +48,36 @@ describe('appendHistory', () => {
     expect(r.samples).toEqual(fresh);
     expect(r.registersFilled).toBe(0);
     expect(r.gapHours).toBe(0);
+  });
+});
+
+describe('withCurrentRegisters', () => {
+  // Old schedule: peak 07–22 on weekdays, weekends off-peak. From the change on: peak 07–11 and
+  // 17–22 every day (Wallonia since 1 Jan 2026).
+  const old = (t: number) => {
+    const d = new Date(t);
+    return d.getDay() >= 1 && d.getDay() <= 5 && d.getHours() >= 7 && d.getHours() < 22 ? 1 : 2;
+  };
+  const now = (t: number) => {
+    const h = new Date(t).getHours();
+    return (h >= 7 && h < 11) || (h >= 17 && h < 22) ? 1 : 2;
+  };
+  const change = t0 + 70 * 24 * H;
+  const samples = hours(t0, 140 * 24, (t) => ({ rate: (t < change ? old(t) : now(t)) as 1 | 2 }));
+
+  it('prices older hours with the schedule of the last eight weeks', () => {
+    const r = withCurrentRegisters(samples);
+    for (const s of r) expect(s.rate).toBe(now(s.t));
+    expect(r.slice(-24)).toEqual(samples.slice(-24)); // recent hours already follow it
+  });
+
+  it('takes the schedule from the whole history even when pricing an older window', () => {
+    const window = samples.slice(0, 30 * 24);
+    for (const s of withCurrentRegisters(window, samples)) expect(s.rate).toBe(now(s.t));
+  });
+
+  it('leaves data without registers alone', () => {
+    const plain = hours(t0, 48);
+    expect(withCurrentRegisters(plain)).toBe(plain);
   });
 });

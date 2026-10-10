@@ -7,7 +7,7 @@ import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
 import { CSV_TEMPLATE, parseCsv } from './data/csv';
 import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole, type ParsedMeter } from './data/meters';
 import { deriveSamples, HOUR_MS, type StatSelection } from './data/derive';
-import { appendHistory, OVERLAP_HOURS } from './data/merge';
+import { appendHistory, OVERLAP_HOURS, withCurrentRegisters } from './data/merge';
 import { compareMeters, METER_KEYS, METER_NAMES, periodIsOff, seriesFromMeters, seriesFromStats, seriesSpan, type MeterComparison, type MeterKey } from './data/compare';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
@@ -773,6 +773,9 @@ function restoreSettings() {
   if (!raw) return;
   try {
     const saved = JSON.parse(raw) as Record<string, string | boolean>;
+    // Settings saved before "Peak hours" became a choice had a checkbox for the meter's registers.
+    if (saved.registerMode === undefined && saved.useMeterRegisters !== undefined)
+      saved.registerMode = saved.useMeterRegisters ? 'current' : 'window';
     for (const [name, value] of Object.entries(saved)) {
       const el = form.elements.namedItem(name);
       if (el instanceof HTMLInputElement && el.type === 'checkbox') el.checked = Boolean(value);
@@ -801,7 +804,7 @@ function readSettings() {
   const b = (name: string) => (form.elements.namedItem(name) as HTMLInputElement).checked;
   const s = (name: string) => (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value;
 
-  const hasRegisters = data !== null && data.samples.some((x) => x.rate);
+  const registerMode = currentRegisterMode();
   const tariff: Tariff = {
     importFlat: n('importFlat', 0.3),
     useTimeOfUse: b('useTimeOfUse'),
@@ -810,7 +813,7 @@ function readSettings() {
     peakStartHour: n('peakStartHour', 7),
     peakEndHour: n('peakEndHour', 23),
     exportPrice: n('exportPrice', 0.08),
-    useMeterRegisters: hasRegisters && b('useMeterRegisters'),
+    useMeterRegisters: registerMode !== 'window',
     peakRegister: s('peakRegister') === '2' ? 2 : 1,
   };
   const options: SimOptions = {
@@ -849,7 +852,14 @@ function readSettings() {
     awayTo: n('evAwayTo', 17),
   };
   const reimb = { on: b('reimbOn'), prices: { defaultPrice: Math.max(0, n('reimbDefault', 0)), months: loadMonthPrices() } as ReimbursementPrices };
-  return { tariff, options, economics, template, sizes, scenario, waterHeater, evSolar, reimb, currency: s('currency') || '€' };
+  return { tariff, registerMode, options, economics, template, sizes, scenario, waterHeater, evSolar, reimb, currency: s('currency') || '€' };
+}
+
+/** How peak hours are decided; always the fixed window when the data has no T1/T2 registers. */
+function currentRegisterMode(): 'current' | 'billed' | 'window' {
+  if (!data || !data.samples.some((x) => x.rate)) return 'window';
+  const v = (form.elements.namedItem('registerMode') as HTMLSelectElement).value;
+  return v === 'billed' || v === 'window' ? v : 'current';
 }
 
 function syncVisibility() {
@@ -858,10 +868,11 @@ function syncVisibility() {
   form.querySelectorAll<HTMLElement>('[data-tou]').forEach((el) => (el.hidden = !tou));
   form.querySelectorAll<HTMLElement>('[data-flat]').forEach((el) => (el.hidden = tou));
   form.querySelectorAll<HTMLElement>('[data-gridcharge]').forEach((el) => (el.hidden = !tou || !gridCharge));
-  // T1/T2 option only when the data has registers; the fixed window hides while it's in use.
+  // T1/T2 options only when the data has registers; the fixed window only when it's in use.
   const registers = data !== null && data.samples.some((x) => x.rate);
-  const useRegisters = registers && (form.elements.namedItem('useMeterRegisters') as HTMLInputElement).checked;
+  const useRegisters = currentRegisterMode() !== 'window';
   form.querySelectorAll<HTMLElement>('[data-registers]').forEach((el) => (el.hidden = !tou || !registers));
+  form.querySelectorAll<HTMLElement>('[data-regpeak]').forEach((el) => (el.hidden = !tou || !useRegisters));
   form.querySelectorAll<HTMLElement>('[data-window]').forEach((el) => (el.hidden = !tou || useRegisters));
   // Water-heater options only make sense when the data has a separately metered water heater.
   const wh = data !== null && hasWaterHeater(data.samples);
@@ -994,10 +1005,22 @@ $('#summary').addEventListener('change', (e) => {
   recompute();
 });
 
+/** The period in use; with "current hours" every hour carries the meter's current T1/T2 schedule. */
+let pricedFor: PreparedData | null = null;
+let priced: PreparedData | null = null;
+function pricedData(data: PreparedData, mode: ReturnType<typeof currentRegisterMode>): PreparedData {
+  if (mode !== 'current') return data;
+  if (pricedFor !== data || !priced) {
+    priced = prepare(withCurrentRegisters(data.samples, allSamples)); // the schedule comes from the newest data
+    pricedFor = data;
+  }
+  return priced;
+}
+
 function recompute() {
   if (!data) return;
   const cfg = readSettings();
-  const measured = data;
+  const measured = pricedData(data, cfg.registerMode);
   const withWh = hasWaterHeater(measured.samples);
   const withEv = measured.samples.some((s) => s.ev > 0);
   const whOn = withWh && cfg.waterHeater.shift;
@@ -1012,7 +1035,7 @@ function recompute() {
   };
   // Re-prepare only when the data-shaping inputs change; tariff or battery edits reuse it.
   const keyFor = (wh: boolean, ev: boolean) =>
-    JSON.stringify([cfg.scenario, wh, wh && cfg.waterHeater.maxKw, ev, ev && cfg.evSolar]);
+    JSON.stringify([cfg.registerMode === 'current', cfg.scenario, wh, wh && cfg.waterHeater.maxKw, ev, ev && cfg.evSolar]);
   if (!simData || keyFor(whOn, evOn) !== simKey) {
     simData = build(whOn, evOn);
     simKey = keyFor(whOn, evOn);
@@ -1256,7 +1279,7 @@ function table(rec: Recommendation, currency: string, highlight: SweepRow | null
 /** Banner shown while a what-if is active, comparing it with the measured history. */
 function scenarioNote(rec: Recommendation, cfg: ReturnType<typeof readSettings>): string {
   if (!data || isNoChange(cfg.scenario)) return '';
-  const measured = simulate(data, { ...cfg.template, nominalKwh: 0 }, cfg.tariff, cfg.options);
+  const measured = simulate(pricedData(data, cfg.registerMode), { ...cfg.template, nominalKwh: 0 }, cfg.tariff, cfg.options);
   const f = rec.annualFactor;
   const now = rec.baseline.annual;
   return `<p class="note"><b>What-if: ${escapeHtml(describeScenario(cfg.scenario))}.</b>
