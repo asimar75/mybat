@@ -1,6 +1,6 @@
 import './styles.css';
 import { reimbursement, type ReimbursementPrices, type ReimbursementResult } from './engine/reimbursement';
-import { applyScenario, describeScenario, isNoChange, shiftWaterHeater, type Scenario } from './engine/scenario';
+import { applyScenario, describeScenario, isNoChange, shiftEvToSolar, shiftWaterHeater, type EvSolarOptions, type Scenario } from './engine/scenario';
 import { createTrace, prepare, simulate, usableKwh, type PreparedData } from './engine/simulate';
 import { sizeRange, sweep, type Recommendation, type SweepRow } from './engine/sweep';
 import type { Economics, HourSample, SimOptions, Tariff } from './engine/types';
@@ -107,6 +107,9 @@ let simKey = '';
 /** The same data with the water-heater option flipped, for the with/without comparison. */
 let altData: PreparedData | null = null;
 let altKey = '';
+/** The same data with EV solar charging toggled, to show what it changes. */
+let evAltData: PreparedData | null = null;
+let evAltKey = '';
 let dataLabel = '';
 let lastCfg: ReturnType<typeof readSettings> | null = null;
 let lastReimb: ReimbursementResult | null = null;
@@ -143,6 +146,7 @@ function applyPeriod() {
   data = prepare(choice === 'all' ? allSamples : choice === '12m' ? lastTwelveMonths(allSamples) : twelveMonthsFrom(allSamples, choice));
   simData = null;
   altData = null;
+  evAltData = null;
   syncVisibility();
   renderMonthPrices();
 }
@@ -835,8 +839,17 @@ function readSettings() {
     evPct: Math.max(-100, n('evPct', 0)),
   };
   const waterHeater = { shift: b('whShift'), maxKw: Math.max(0.1, n('whMaxKw', 1)) };
+  const evSolar: EvSolarOptions & { on: boolean } = {
+    on: b('evSolar'),
+    minKw: n('evMinKw', 1.4),
+    maxKw: Math.max(1, n('evMaxKw', 11)),
+    bufferKwh: Math.max(0, n('evBufferKwh', 20)),
+    awayDays: [0, 1, 2, 3, 4, 5, 6].filter((d) => b(`evAway${d}`)),
+    awayFrom: n('evAwayFrom', 9),
+    awayTo: n('evAwayTo', 17),
+  };
   const reimb = { on: b('reimbOn'), prices: { defaultPrice: Math.max(0, n('reimbDefault', 0)), months: loadMonthPrices() } as ReimbursementPrices };
-  return { tariff, options, economics, template, sizes, scenario, waterHeater, reimb, currency: s('currency') || '€' };
+  return { tariff, options, economics, template, sizes, scenario, waterHeater, evSolar, reimb, currency: s('currency') || '€' };
 }
 
 function syncVisibility() {
@@ -855,6 +868,10 @@ function syncVisibility() {
   const whShift = (form.elements.namedItem('whShift') as HTMLInputElement).checked;
   form.querySelectorAll<HTMLElement>('[data-wh]').forEach((el) => (el.hidden = !wh));
   form.querySelectorAll<HTMLElement>('[data-whshift]').forEach((el) => (el.hidden = !wh || !whShift));
+  const ev = data !== null && data.samples.some((x) => x.ev > 0);
+  const evSolar = (form.elements.namedItem('evSolar') as HTMLInputElement).checked;
+  form.querySelectorAll<HTMLElement>('[data-ev]').forEach((el) => (el.hidden = !ev));
+  form.querySelectorAll<HTMLElement>('[data-evsolar]').forEach((el) => (el.hidden = !ev || !evSolar));
   const reimbOn = (form.elements.namedItem('reimbOn') as HTMLInputElement).checked;
   form.querySelectorAll<HTMLElement>('[data-reimb]').forEach((el) => (el.hidden = !reimbOn));
 }
@@ -982,33 +999,83 @@ function recompute() {
   const cfg = readSettings();
   const measured = data;
   const withWh = hasWaterHeater(measured.samples);
-  const shiftOn = withWh && cfg.waterHeater.shift;
-  const build = (shift: boolean) => {
-    if (!shift && isNoChange(cfg.scenario)) return measured;
-    const scaled = applyScenario(measured.samples, cfg.scenario);
-    return prepare(shift ? shiftWaterHeater(scaled, cfg.waterHeater.maxKw) : scaled);
+  const withEv = measured.samples.some((s) => s.ev > 0);
+  const whOn = withWh && cfg.waterHeater.shift;
+  const evOn = withEv && cfg.evSolar.on;
+  // EV first (the bigger load), then the water heater takes what surplus is left.
+  const build = (wh: boolean, ev: boolean, evOpts: EvSolarOptions = cfg.evSolar) => {
+    if (!wh && !ev && isNoChange(cfg.scenario)) return measured;
+    let x = applyScenario(measured.samples, cfg.scenario);
+    if (ev) x = shiftEvToSolar(x, evOpts);
+    if (wh) x = shiftWaterHeater(x, cfg.waterHeater.maxKw);
+    return prepare(x);
   };
   // Re-prepare only when the data-shaping inputs change; tariff or battery edits reuse it.
-  const keyFor = (shift: boolean) => `${cfg.scenario.householdPct}|${cfg.scenario.evPct}|${shift}|${cfg.waterHeater.maxKw}`;
-  if (!simData || keyFor(shiftOn) !== simKey) {
-    simData = build(shiftOn);
-    simKey = keyFor(shiftOn);
+  const keyFor = (wh: boolean, ev: boolean) =>
+    JSON.stringify([cfg.scenario, wh, wh && cfg.waterHeater.maxKw, ev, ev && cfg.evSolar]);
+  if (!simData || keyFor(whOn, evOn) !== simKey) {
+    simData = build(whOn, evOn);
+    simKey = keyFor(whOn, evOn);
   }
   const rec = sweep(simData, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
   let whItem = '';
   if (withWh) {
-    if (!altData || keyFor(!shiftOn) !== altKey) {
-      altData = build(!shiftOn);
-      altKey = keyFor(!shiftOn);
+    if (!altData || keyFor(!whOn, evOn) !== altKey) {
+      altData = build(!whOn, evOn);
+      altKey = keyFor(!whOn, evOn);
     }
     const alt = sweep(altData, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
-    whItem = waterHeaterInsight(shiftOn ? rec : alt, shiftOn ? alt : rec, shiftOn, cfg.currency);
+    whItem = waterHeaterInsight(whOn ? rec : alt, whOn ? alt : rec, whOn, cfg.currency);
+  }
+  let evItem = '';
+  if (withEv) {
+    if (!evAltData || keyFor(whOn, !evOn) !== evAltKey) {
+      evAltData = build(whOn, !evOn);
+      evAltKey = keyFor(whOn, !evOn);
+    }
+    const alt = sweep(evAltData, cfg.template, cfg.sizes, cfg.tariff, cfg.options, cfg.economics);
+    // The other charger type, without a battery only: does phase switching matter for this house?
+    const otherMin = cfg.evSolar.minKw < 2 ? 4.1 : 1.4;
+    const other = sweep(build(whOn, true, { ...cfg.evSolar, minKw: otherMin }), cfg.template, [], cfg.tariff, cfg.options, cfg.economics);
+    const solarData = evOn ? simData : evAltData;
+    const plainData = evOn ? evAltData : simData;
+    evItem = evSolarInsight(evOn ? rec : alt, evOn ? alt : rec, evOn, cfg, {
+      gridBefore: evFromGrid(plainData.samples) * rec.annualFactor,
+      gridAfter: evFromGrid(solarData.samples) * rec.annualFactor,
+      otherMin,
+      otherCost: other.baseline.annual.netCost,
+    });
   }
   lastRec = rec;
   lastCfg = cfg;
   lastReimb = cfg.reimb.on ? reimbursement(simData.samples, cfg.reimb.prices) : null;
-  const extra = [whItem, lastReimb ? reimbursementInsight(rec, lastReimb, cfg.currency) : ''].filter(Boolean);
+  const extra = [evItem, whItem, lastReimb ? reimbursementInsight(rec, lastReimb, cfg.currency) : ''].filter(Boolean);
   renderResults(rec, cfg.currency, cfg.options.evMode, cfg.economics.horizonYears, scenarioNote(rec, cfg), extra);
+}
+
+/** Compares charging the EV from solar surplus with the measured charging times. */
+function evSolarInsight(
+  solar: Recommendation,
+  measured: Recommendation,
+  on: boolean,
+  cfg: ReturnType<typeof readSettings>,
+  e: { gridBefore: number; gridAfter: number; otherMin: number; otherCost: number },
+): string {
+  const c = cfg.currency;
+  const save = measured.baseline.annual.netCost - solar.baseline.annual.netCost;
+  const best = (r: Recommendation) => (r.best ? `${r.best.nominalKwh} kWh (${money(r.best.netBenefit, c)} net)` : 'no size pays back');
+  const charger =
+    e.otherMin > cfg.evSolar.minKw
+      ? `A charger stuck on three phases (4.1 kW minimum) would save ${money(e.otherCost - solar.baseline.annual.netCost, c)} a year less.`
+      : `A charger that can drop to one phase (1.4 kW minimum) would save ${money(solar.baseline.annual.netCost - e.otherCost, c)} a year more.`;
+  const battery =
+    !solar.best && !measured.best
+      ? 'At these prices no battery pays back either way.'
+      : `Best battery: ${best(solar)} with solar charging, ${best(measured)} with the measured charging times — the car now uses solar the battery would otherwise store.`;
+  const lead = on
+    ? `<b>EV on solar surplus</b> saves ${money(save, c)} a year before any battery`
+    : `<b>Try “Charge the EV from solar surplus”</b> in Strategy: it would save ${money(save, c)} a year with no battery at all`;
+  return `${lead}: the car's grid charging falls from ${kwh(e.gridBefore)} to ${kwh(e.gridAfter)} a year. ${charger} ${battery}`;
 }
 
 /**
@@ -1143,7 +1210,7 @@ function insights(rec: Recommendation, focus: SweepRow | null, currency: string,
     items.push(
       `The EV takes ${kwh(evGrid)} a year from the grid, ${pct(share)} of all your imports. ` +
         (evMode === 'exclude'
-          ? 'Moving that charging to sunny hours (a solar-aware charger) is free and may be worth more than a bigger battery.'
+          ? (lastCfg?.evSolar.on ? 'This is with solar charging on; the rest happens when there is no surplus or the car is away.' : 'Moving that charging to sunny hours (a solar-aware charger) is free and may be worth more than a bigger battery: see “Charge the EV from solar surplus” in Strategy.')
           : 'You let the battery charge the car. Expect it to be drained by every charge session, which pushes the "best" size up and the payback out.'),
     );
   }

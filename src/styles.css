@@ -739,3 +739,18 @@ tr.short td:last-child {
 .size-chip:disabled:not([aria-pressed='true']) {
   opacity: 0.4;
 }
+
+.day-picks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  font-size: 0.9rem;
+}
+.day-picks > span {
+  flex-basis: 100%;
+}
+label.check.day {
+  margin-top: 0;
+  gap: 4px;
+}
