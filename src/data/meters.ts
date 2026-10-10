@@ -385,6 +385,12 @@ export function suggestRole(m: ParsedMeter): MeterRole {
   return 'ignore';
 }
 
+/** Solar meters count production in whichever direction dominates (usually "export"). */
+export const solarValue = (m: ParsedMeter, h: HourEnergy) =>
+  m.exportTotal >= m.importTotal ? Math.max(0, h.exp - h.imp) : Math.max(0, h.imp - h.exp);
+/** What a consuming meter (EV, water heater, total use) used in an hour. */
+export const loadValue = (h: HourEnergy) => Math.max(0, h.imp - h.exp);
+
 export interface MeterAssignment {
   meter: ParsedMeter;
   role: MeterRole;
@@ -442,10 +448,6 @@ export function combineMeters(assigned: MeterAssignment[], commonPeriodOnly: boo
     );
   }
 
-  // Solar meters count production in whichever direction dominates (usually "export").
-  const solarValue = (m: ParsedMeter, h: HourEnergy) =>
-    m.exportTotal >= m.importTotal ? Math.max(0, h.exp - h.imp) : Math.max(0, h.imp - h.exp);
-  const loadValue = (h: HourEnergy) => Math.max(0, h.imp - h.exp);
   const registerMeter = grid.find((m) => m.hasRegisters);
 
   const samples: HourSample[] = [];

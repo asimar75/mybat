@@ -8,11 +8,12 @@ import { CSV_TEMPLATE, parseCsv } from './data/csv';
 import { combineMeters, parseMeterCsv, ROLE_LABELS, suggestRole, type MeterRole, type ParsedMeter } from './data/meters';
 import { deriveSamples, HOUR_MS, type StatSelection } from './data/derive';
 import { appendHistory, OVERLAP_HOURS } from './data/merge';
+import { compareMeters, METER_KEYS, METER_NAMES, periodIsOff, seriesFromMeters, seriesFromStats, seriesSpan, type MeterComparison, type MeterKey } from './data/compare';
 import { demoYear } from './data/demo';
 import { HomeAssistantClient, looksLikeEv, looksLikeWaterHeater, parseEnergyPrefs } from './data/homeassistant';
 import { addDays, dailyTotals, hasMeterGrid, hasWaterHeater, lastTwelveMonths, spansMoreThanAYear, twelveMonthsFrom, yearStarts, hourProfile, LIMITS, localDay, monthlyTotals, runChecks, toCsv, type DayTotals, type HourProfile } from './data/validate';
 import { clearDataset, deleteRemoteDataset, fetchRemoteDataset, fetchRemoteSettings, loadDataset, pushRemoteDataset, pushRemoteSettings, saveDataset, type SavedDataset, type SharedSettings } from './data/persist';
-import { renderBatteryCharts, renderCharts, renderDataCharts, renderMonthlyChart } from './ui/charts';
+import { renderBatteryCharts, renderCharts, renderCompareCharts, renderDataCharts, renderMonthlyChart } from './ui/charts';
 import { exportExcel } from './ui/excel';
 import { dateRange, escapeHtml, fmtDate, fmtDateTime, fmtMonth, fmtTime, kwh, money, num1, pct, years } from './ui/format';
 
@@ -270,7 +271,11 @@ function renderMeterFiles() {
     })
     .join('');
   $('#meter-files').hidden = meterFiles.length === 0;
+  renderCompareReady();
 }
+
+/** The picked meter files with a role, as loading (or comparing) uses them. */
+const assignedMeters = () => meterFiles.filter((f) => f.meter && f.role !== 'ignore').map((f) => ({ meter: f.meter!, role: f.role }));
 
 $<HTMLInputElement>('#csv-file').addEventListener('change', async (e) => {
   const files = [...((e.target as HTMLInputElement).files ?? [])];
@@ -307,11 +312,12 @@ $('#meter-rows').addEventListener('change', (e) => {
   if (!f) return;
   f.role = el.value as MeterRole;
   storage.set(ROLE_KEY, JSON.stringify({ ...savedRoles(), [roleKey(f.name)]: f.role }));
+  renderCompareReady();
 });
 
 $('#meter-load').addEventListener('click', () => {
   try {
-    const assigned = meterFiles.filter((f) => f.meter && f.role !== 'ignore').map((f) => ({ meter: f.meter!, role: f.role }));
+    const assigned = assignedMeters();
     const r = combineMeters(assigned, $<HTMLInputElement>('#meter-common').checked);
     if (r.peakRegisterGuess) {
       (form.elements.namedItem('peakRegister') as HTMLSelectElement).value = String(r.peakRegisterGuess);
@@ -348,6 +354,19 @@ const mapFields = {
   batteryIn: $<HTMLInputElement>('#map-bi'),
 };
 const splitIds = (v: string) => v.split(',').map((s) => s.trim()).filter(Boolean);
+
+/** The sensors picked under Home Assistant. */
+function readSelection(): StatSelection {
+  return {
+    gridImport: splitIds(mapFields.gridImport.value),
+    gridExport: splitIds(mapFields.gridExport.value),
+    solar: splitIds(mapFields.solar.value),
+    batteryOut: splitIds(mapFields.batteryOut.value),
+    batteryIn: splitIds(mapFields.batteryIn.value),
+    ev: mapFields.ev.value.trim(),
+    wh: mapFields.wh.value.trim(),
+  };
+}
 const haDays = $<HTMLInputElement>('#ha-days');
 haDays.value = storage.get('mybat.haDays') ?? haDays.value;
 haDays.addEventListener('change', () => storage.set('mybat.haDays', haDays.value));
@@ -397,6 +416,7 @@ $('#ha-connect').addEventListener('click', async () => {
   setStatus('Connecting to Home Assistant…');
   try {
     ha?.close();
+    ha = null; // a failed attempt must not leave the closed client looking connected
     ha = await HomeAssistantClient.connect(haUrl.value, haToken.value);
     storage.set('mybat.haUrl', haUrl.value.trim());
     storage.set('mybat.haToken', haRemember.checked ? haToken.value.trim() : null);
@@ -428,6 +448,7 @@ $('#ha-connect').addEventListener('click', async () => {
     fillSensorFields(saved ?? detectedSensors);
     $('#sensors-saved').textContent = saved ? 'Using your saved sensor choices.' : '';
     $('#ha-mapping').hidden = false;
+    renderCompareReady();
 
     if (saved) {
       setStatus('Connected. Your saved sensors are filled in — load history when ready.', 'ok');
@@ -453,15 +474,7 @@ $('#ha-load').addEventListener('click', async () => {
   if (!ha) return;
   const button = $<HTMLButtonElement>('#ha-load');
   button.disabled = true;
-  const sel: StatSelection = {
-    gridImport: splitIds(mapFields.gridImport.value),
-    gridExport: splitIds(mapFields.gridExport.value),
-    solar: splitIds(mapFields.solar.value),
-    batteryOut: splitIds(mapFields.batteryOut.value),
-    batteryIn: splitIds(mapFields.batteryIn.value),
-    ev: mapFields.ev.value.trim(),
-    wh: mapFields.wh.value.trim(),
-  };
+  const sel = readSelection();
   const ids = [...new Set([...sel.gridImport, ...sel.gridExport, ...sel.solar, ...sel.batteryOut, ...sel.batteryIn, sel.ev, sel.wh ?? ''].filter(Boolean))];
   saveSensors();
   const days = Math.max(7, Math.min(1825, Number(haDays.value) || 365));
@@ -519,6 +532,235 @@ $('#ha-load').addEventListener('click', async () => {
   } finally {
     button.disabled = false;
   }
+});
+
+// ---------- compare Home Assistant with the CSV files ----------
+// Read-only: fetches Home Assistant's statistics for the period the picked CSV files cover and
+// compares each meter over the hours both have. Nothing here changes the loaded history.
+
+let comparison: MeterComparison[] = [];
+let cmpMeter: MeterKey | null = null;
+let cmpDay = '';
+/** Meters only one side has, named so a missing sensor or file isn't mistaken for a match. */
+let cmpSkipped: string[] = [];
+
+function renderCompareReady() {
+  const files = assignedMeters();
+  const item = (ok: boolean, title: string, detail: string) =>
+    `<li class="${ok ? 'ok' : 'warn'}"><span class="icon" aria-label="${ok ? 'OK' : 'To do'}">${ok ? '✓' : '!'}</span><b>${title}</b><p>${detail}</p></li>`;
+  $('#cmp-ready').innerHTML =
+    item(
+      files.length > 0,
+      'CSV files',
+      files.length
+        ? escapeHtml(files.map((f) => `${f.meter.name} (${ROLE_LABELS[f.role]})`).join(', '))
+        : 'Pick your meter files under “CSV files” and set what each one is. You don’t need to load them.',
+    ) +
+    item(ha !== null, 'Home Assistant', ha ? 'Connected. The sensors picked there are compared.' : 'Connect under “Home Assistant” and check the sensors.');
+  $<HTMLButtonElement>('#cmp-run').disabled = files.length === 0 || ha === null;
+}
+renderCompareReady();
+
+const cmpStatus = (msg: string, kind: 'info' | 'error' | 'ok' = 'info') => {
+  const el = $('#cmp-status');
+  el.textContent = msg;
+  el.dataset.kind = kind;
+};
+
+$('#cmp-run').addEventListener('click', async () => {
+  if (!ha) return;
+  const button = $<HTMLButtonElement>('#cmp-run');
+  const csv = seriesFromMeters(assignedMeters());
+  const span = seriesSpan(csv);
+  if (!span) {
+    cmpStatus('None of the picked files is a grid, solar, EV or water-heater meter.', 'error');
+    return;
+  }
+  const sel = readSelection();
+  const sensors: Record<MeterKey, string[]> = {
+    gridIn: sel.gridImport,
+    gridOut: sel.gridExport,
+    solar: sel.solar,
+    ev: sel.ev ? [sel.ev] : [],
+    wh: sel.wh ? [sel.wh] : [],
+  };
+  const ids = [...new Set(METER_KEYS.flatMap((k) => (csv[k] ? sensors[k] : [])))];
+  cmpSkipped = METER_KEYS.filter((k) => !csv[k] !== !sensors[k].length).map(
+    (k) => `${METER_NAMES[k]} (${csv[k] ? 'no Home Assistant sensor picked' : 'no CSV file'})`,
+  );
+  if (ids.length === 0) {
+    cmpStatus('No Home Assistant sensor is picked for the meters in the CSV files.', 'error');
+    return;
+  }
+  const now = new Date();
+  now.setMinutes(0, 0, 0);
+  const start = Math.max(span.first, now.getTime() - 1825 * 24 * HOUR_MS);
+  const end = Math.min(span.last + HOUR_MS, now.getTime());
+  button.disabled = true;
+  try {
+    const stats = await ha.hourlyChanges(ids, new Date(start), new Date(end), (f) => cmpStatus(`Downloading from Home Assistant… ${Math.round(f * 100)} %`));
+    comparison = compareMeters(csv, seriesFromStats(stats, sel));
+    for (const k of METER_KEYS) {
+      if (csv[k] && sensors[k].length && !comparison.some((c) => c.meter === k)) cmpSkipped.push(`${METER_NAMES[k]} (no hours both have)`);
+    }
+    if (comparison.length === 0) {
+      $('#cmp-result').innerHTML = '';
+      cmpDay = '';
+      cmpStatus(`Home Assistant has no hours in ${dateRange(start, end - HOUR_MS)} for these sensors, so there's nothing to compare.`, 'error');
+      return;
+    }
+    if (!comparison.some((c) => c.meter === cmpMeter)) cmpMeter = comparison[0].meter;
+    cmpDay = '';
+    renderComparison();
+    cmpStatus(`Compared ${comparison.length} meter${comparison.length === 1 ? '' : 's'}.`, 'ok');
+  } catch (err) {
+    cmpStatus((err as Error).message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+/** "+2.1 %" of Home Assistant against the CSV, or "–" when the CSV total is ~0. */
+function diffPct(csv: number, haKwh: number): string {
+  if (csv <= 0.05) return '–';
+  const share = (haKwh - csv) / csv;
+  return Math.abs(share) < 0.0005 ? '0 %' : `${share > 0 ? '+' : '−'}${num1(Math.abs(share) * 100)} %`;
+}
+const kwh1 = (v: number) => `${num1(v)} kWh`;
+/** A difference in kWh, without a "−0" for rounding noise. */
+const kwhDiff = (v: number) => (Math.abs(v) < 0.05 ? '0 kWh' : `${v > 0 ? '+' : '−'}${num1(Math.abs(v))} kWh`);
+
+/** Plain-language findings for one meter. */
+function comparisonNotes(c: MeterComparison): string[] {
+  const name = METER_NAMES[c.meter];
+  const out: string[] = [];
+  if (c.shift) {
+    const n = Math.abs(c.shift);
+    out.push(
+      `${name}: Home Assistant's hours sit ${n} hour${n === 1 ? '' : 's'} ${c.shift > 0 ? 'later' : 'earlier'} than the CSV's. ` +
+        'Daily totals can still match, but hour-by-hour values (and the T1/T2 pattern for hours added from Home Assistant) are off. Usually a time-zone setting in Home Assistant or the export.',
+    );
+  }
+  const gap = c.haKwh - c.csvKwh;
+  if (Math.abs(gap) > 1 && Math.abs(gap) > 0.03 * Math.max(c.csvKwh, c.haKwh)) {
+    out.push(
+      `${name}: Home Assistant reads ${diffPct(c.csvKwh, c.haKwh)} (${kwhDiff(gap)}) against the CSV over this period. ` +
+        (c.meter === 'gridIn' || c.meter === 'gridOut'
+          ? 'Check that the sensors are the same meter and that both tariff registers (T1 and T2) are picked.'
+          : 'Check that the sensor and the file are the same meter.'),
+    );
+  }
+  if (c.missingInHa) out.push(`${name}: Home Assistant has no value for ${c.missingInHa.toLocaleString()} hours the CSV has inside this period (offline?). When it caught up afterwards, the totals still match; when it didn't, its total is lower.`);
+  if (c.missingInCsv) out.push(`${name}: the CSV has no value for ${c.missingInCsv.toLocaleString()} hours Home Assistant has inside this period, so those hours count only in Home Assistant's total.`);
+  return out;
+}
+
+function renderComparison() {
+  const c = comparison.find((x) => x.meter === cmpMeter);
+  if (!c) return;
+  const rows = comparison
+    .map((m) => {
+      const ok = comparisonNotes(m).length === 0;
+      return `<tr${m === c ? ' class="hl"' : ''}>
+        <td>${ok ? '✓' : '<span class="flag">!</span>'} ${METER_NAMES[m.meter]}</td>
+        <td>${dateRange(m.hours[0].t, m.hours[m.hours.length - 1].t)}</td><td>${m.compared.toLocaleString()}</td>
+        <td>${kwh1(m.csvKwh)}</td><td>${kwh1(m.haKwh)}</td><td>${kwhDiff(m.haKwh - m.csvKwh)} (${diffPct(m.csvKwh, m.haKwh)})</td>
+        <td${m.offHours ? ' class="flag"' : ''}>${m.offHours.toLocaleString()}</td></tr>`;
+    })
+    .join('');
+  const notes = [...comparison.flatMap(comparisonNotes), ...(cmpSkipped.length ? [`Not compared: ${cmpSkipped.join(', ')}.`] : [])];
+  const worst = [...c.daily]
+    .filter(periodIsOff)
+    .sort((a, b) => Math.abs(b.ha - b.csv) - Math.abs(a.ha - a.csv))
+    .slice(0, 5);
+  const months = c.monthly
+    .map(
+      (m) => `<tr${periodIsOff(m) ? ' class="short"' : ''}><td>${fmtMonth(m.key)}</td><td>${kwh1(m.csv)}</td><td>${kwh1(m.ha)}</td>
+        <td>${kwhDiff(m.ha - m.csv)} (${diffPct(m.csv, m.ha)})</td><td>${m.hours.toLocaleString()}</td></tr>`,
+    )
+    .join('');
+  $('#cmp-result').innerHTML = `
+    <div class="scroll"><table>
+      <thead><tr><th>Meter</th><th>Period both cover</th><th>Hours compared</th><th>CSV</th><th>Home Assistant</th><th>Difference</th>
+        <th title="Hours that differ by more than 0.1 kWh and 10 %">Hours off</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <p class="hint">The same meter recorded twice should agree within a few tenths of a percent. “Hours off” differ by more than 0.1 kWh and 10 %:
+      a few are normal when one side was offline and caught up in a later hour (the totals still match then).</p>
+    ${notes.map((n) => `<p class="note">${escapeHtml(n)}</p>`).join('')}
+    <div class="sim-controls" style="margin-top:14px">
+      <label>Meter
+        <select id="cmp-meter">${comparison.map((m) => `<option value="${m.meter}"${m === c ? ' selected' : ''}>${METER_NAMES[m.meter]}</option>`).join('')}</select>
+      </label>
+    </div>
+    <div class="charts">
+      <figure class="wide">
+        <figcaption>${METER_NAMES[c.meter]} per day<small>The two lines should lie on top of each other; the bars show the difference. Click a day to see it hour by hour.</small></figcaption>
+        <div class="chart-box"><canvas id="chart-cmp-daily" role="img" aria-label="Daily energy from Home Assistant and the CSV file"></canvas></div>
+      </figure>
+      <figure class="wide">
+        <figcaption class="day-pick">
+          <span>One day, hour by hour</span>
+          <span class="date-step">
+            <button class="link-btn" type="button" data-cmp-shift="-1" aria-label="Previous day">◀ Day</button>
+            <span class="date-field">
+              <input id="cmp-day" type="date" class="date-native" tabindex="-1" aria-hidden="true" />
+              <button type="button" class="date-display" data-for="cmp-day" aria-label="Choose the day to compare"></button>
+            </span>
+            <button class="link-btn" type="button" data-cmp-shift="1" aria-label="Next day">Day ▶</button>
+          </span>
+        </figcaption>
+        <div class="chart-box"><canvas id="chart-cmp-day" role="img" aria-label="Hourly energy from Home Assistant and the CSV file for the selected day"></canvas></div>
+      </figure>
+    </div>
+    <p class="hint">${
+      worst.length
+        ? `Days that differ most: <span class="examples">${worst.map((d) => `<button type="button" class="link-btn" data-cmp-pick="${d.key}">${fmtDate(d.key)} (${kwhDiff(d.ha - d.csv)})</button>`).join(' ')}</span>`
+        : 'No day differs by more than 3 %.'
+    }</p>
+    <details class="table-wrap">
+      <summary>${METER_NAMES[c.meter]} per month</summary>
+      <div class="scroll"><table>
+        <thead><tr><th>Month</th><th>CSV</th><th>Home Assistant</th><th>Difference</th><th>Hours compared</th></tr></thead>
+        <tbody>${months}</tbody>
+      </table></div>
+    </details>`;
+  showCmpDay(cmpDay || worst[0]?.key || c.daily[c.daily.length - 1].key);
+}
+
+function showCmpDay(day: string) {
+  const c = comparison.find((x) => x.meter === cmpMeter);
+  const input = document.getElementById('cmp-day') as HTMLInputElement | null;
+  if (!c || !input) return;
+  const first = c.daily[0].key;
+  const last = c.daily[c.daily.length - 1].key;
+  cmpDay = day < first ? first : day > last ? last : day;
+  input.min = first;
+  input.max = last;
+  setDateField(input, cmpDay);
+  $<HTMLButtonElement>('[data-cmp-shift="-1"]').disabled = cmpDay <= first;
+  $<HTMLButtonElement>('[data-cmp-shift="1"]').disabled = cmpDay >= last;
+  renderCompareCharts(c.daily, c.hours.filter((h) => localDay(h.t) === cmpDay), showCmpDay);
+}
+
+$('#cmp-result').addEventListener('click', (e) => {
+  const el = e.target as HTMLElement;
+  const pick = el.closest<HTMLButtonElement>('[data-cmp-pick]')?.dataset.cmpPick;
+  if (pick) {
+    showCmpDay(pick);
+    document.getElementById('chart-cmp-day')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  const shift = el.closest<HTMLButtonElement>('[data-cmp-shift]')?.dataset.cmpShift;
+  if (shift && cmpDay) showCmpDay(addDays(cmpDay, Number(shift)));
+});
+
+$('#cmp-result').addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement | HTMLSelectElement;
+  if (el.id === 'cmp-meter') {
+    cmpMeter = el.value as MeterKey;
+    renderComparison();
+  } else if (el.id === 'cmp-day' && el.value) showCmpDay(el.value);
 });
 
 // ---------- settings ----------
@@ -1282,6 +1524,7 @@ $('#results-body').addEventListener('change', (e) => {
 // Re-draw charts when the OS theme flips so their colours follow.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (data) showDay(selectedDay);
+  if (cmpDay) showCmpDay(cmpDay);
   if (lastRec) recompute();
 });
 
