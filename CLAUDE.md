@@ -35,7 +35,7 @@ vitest. No backend besides a Vite plugin (below). Port 8050 (`strictPort`, `host
     replaced at 70 % capacity (`END_OF_LIFE`), replacement at a share of today's price, straight-line
     leftover value, discounting (real rate), discounted payback; `best` = highest net benefit,
     `knee` = smallest size with ≥ 90 % of the max saving
-  - `scenario.ts` (what-if % and water heater on solar surplus), `reimbursement.ts` (employer EV
+  - `scenario.ts` (what-if %, water heater and EV on solar surplus), `reimbursement.ts` (employer EV
     reimbursement per month; never part of battery savings)
 - `src/data/`
   - `meters.ts` — HomeWizard per-meter CSV import (cumulative 15-min registers, T1/T2, DST, gaps,

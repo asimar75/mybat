@@ -83,6 +83,16 @@
             <label data-tou data-gridcharge>Grid-charge up to % <input name="gridChargePct" type="number" min="10" max="100" value="100" /></label>
             <label class="check" data-wh><input name="whShift" type="checkbox" /> Run water heater on solar surplus</label>
             <label data-wh data-whshift>Water heater max power (kW) <input name="whMaxKw" type="number" step="0.1" min="0.1" max="6" value="1" /></label>
+            <label class="check" data-ev><input name="evSolar" type="checkbox" /> Charge the EV from solar surplus</label>
+            <label data-ev data-evsolar>Charger's lowest power
+              <select name="evMinKw"><option value="1.4">1.4 kW (1-phase or 1↔3 switching)</option><option value="4.1">4.1 kW (3-phase only)</option></select>
+            </label>
+            <label data-ev data-evsolar>Charger's highest power (kW) <input name="evMaxKw" type="number" step="0.1" min="1" max="22" value="11" /></label>
+            <label data-ev data-evsolar>Room in the car's battery for solar (kWh) <input name="evBufferKwh" type="number" step="5" min="0" max="120" value="20" /></label>
+            <div data-ev data-evsolar class="day-picks"><span>Car away during the day on</span><label class="check day"><input name="evAway1" type="checkbox" /> Mon</label><label class="check day"><input name="evAway2" type="checkbox" checked /> Tue</label><label class="check day"><input name="evAway3" type="checkbox" /> Wed</label><label class="check day"><input name="evAway4" type="checkbox" checked /> Thu</label><label class="check day"><input name="evAway5" type="checkbox" /> Fri</label><label class="check day"><input name="evAway6" type="checkbox" /> Sat</label><label class="check day"><input name="evAway0" type="checkbox" /> Sun</label></div>
+            <label data-ev data-evsolar>Away from (hour) <input name="evAwayFrom" type="number" min="0" max="23" value="9" /></label>
+            <label data-ev data-evsolar>Back at (hour) <input name="evAwayTo" type="number" min="1" max="24" value="17" /></label>
+            <p class="hint" data-ev data-evsolar style="margin:0">Like a charger in solar mode with the car left plugged in: surplus goes into the car while it's home; what's still missing is charged from the grid when it was really charged.</p>
             <label>Largest size to test (kWh) <input name="maxKwh" type="number" min="2" max="100" value="25" /></label>
             <label>Size step (kWh) <input name="stepKwh" type="number" step="0.5" min="0.5" value="1" /></label>
           </fieldset>

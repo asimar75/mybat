@@ -242,6 +242,16 @@ share of today's price (default 70 %, since prices keep falling). The simulation
 cycles from your data, so a bigger battery, cycling less, lasts longer. As it fades, a battery saves
 what a smaller new one would, so an oversized battery hardly notices its wear.
 
+### EV on solar surplus
+
+**Charge the EV from solar surplus** (Strategy) simulates a charger in solar mode with the car left
+plugged in: surplus goes into the car while it's home, up to the room you keep free in its battery,
+and only when the surplus reaches the charger's lowest power (1.4 kW on one phase or with 1↔3-phase
+switching, 4.1 kW on three phases only). Whatever the car still needs is charged from the grid when
+it really was charged. Set the days and hours the car is away. The result shows the saving with no
+battery, what the other charger type would save, and the best battery with and without it — charging
+the car from solar uses surplus the battery would otherwise store, so it lowers the battery's value.
+
 ### Known limits
 
 - **Hourly resolution** misses spikes inside an hour and nets import against export within each hour, so savings are slightly underestimated.

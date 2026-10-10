@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyScenario, describeScenario, isNoChange, NO_CHANGE, shiftWaterHeater } from './scenario';
+import { applyScenario, describeScenario, isNoChange, NO_CHANGE, shiftEvToSolar, shiftWaterHeater, type EvSolarOptions } from './scenario';
+import type { HourSample } from './types';
 import { prepare, simulate } from './simulate';
 import { sizeRange, sweep } from './sweep';
 import { demoYear } from '../data/demo';
@@ -86,5 +87,43 @@ describe('water heater shifting on the demo year', () => {
     expect(after.totalLoadKwh).toBeCloseTo(before.totalLoadKwh, 6);
     expect(after.importKwh).toBeLessThan(before.importKwh);
     expect(after.netCost).toBeLessThan(before.netCost);
+  });
+});
+
+describe('shiftEvToSolar', () => {
+  // Two days from Monday 1 Sep 2025, local time: 4 kW surplus 10:00–15:00, 7 kWh charged at 20:00 each day.
+  const t0 = new Date(2025, 8, 1, 0).getTime();
+  const days = (n: number, solarKw = 4.5): HourSample[] =>
+    Array.from({ length: n * 24 }, (_, i) => {
+      const h = i % 24;
+      return { t: t0 + i * 3600_000, house: 0.5, ev: h === 20 ? 7 : 0, solar: h >= 10 && h < 15 ? solarKw : 0 };
+    });
+  const opts: EvSolarOptions = { minKw: 1.4, maxKw: 11, bufferKwh: 20, awayDays: [], awayFrom: 9, awayTo: 17 };
+  const at = (xs: HourSample[], day: number, hour: number) => xs[day * 24 + hour];
+  const total = (xs: HourSample[]) => xs.reduce((a, s) => a + s.ev, 0);
+
+  it('charges from midday surplus and no longer from the grid in the evening', () => {
+    const out = shiftEvToSolar(days(2), opts);
+    expect(at(out, 0, 10).ev).toBeCloseTo(4); // surplus 4.5 − 0.5 house
+    expect(at(out, 0, 20).ev).toBeCloseTo(0); // covered by what solar put in the car
+    expect(at(out, 1, 20).ev).toBeCloseTo(0);
+    // Never more than the room in the car ahead of need; total energy only grows by what's left banked.
+    const banked = total(out) - total(days(2));
+    expect(banked).toBeGreaterThanOrEqual(0);
+    expect(banked).toBeLessThanOrEqual(20 + 1e-9);
+  });
+
+  it('waits for the charger minimum and for the car to be home', () => {
+    const small = days(1, 3.5); // 3 kW surplus
+    expect(at(shiftEvToSolar(small, { ...opts, minKw: 4.1 }), 0, 20).ev).toBeCloseTo(7); // three-phase only: no solar charging
+    expect(at(shiftEvToSolar(small, opts), 0, 20).ev).toBeCloseTo(0); // one phase: 5 × 3 kW banked
+    const away = shiftEvToSolar(days(1), { ...opts, awayDays: [1] }); // Monday, 9–17
+    expect(at(away, 0, 12).ev).toBe(0);
+    expect(at(away, 0, 20).ev).toBeCloseTo(7);
+  });
+
+  it('leaves data without EV charging alone', () => {
+    const none = days(1).map((s) => ({ ...s, ev: 0 }));
+    expect(shiftEvToSolar(none, opts)).toBe(none);
   });
 });
